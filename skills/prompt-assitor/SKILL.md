@@ -1,14 +1,39 @@
 ---
 name: prompt-assitor
-description: "提示词工作台：创建、优化或分析提示词。当用户需要从需求创建新提示词、优化改进已有提示词、或分析评估提示词质量时使用。触发词包括：提示词、prompt、创建提示词、优化提示词、分析提示词、改进prompt、写个prompt、元提示词。"
-disable-model-invocation: true                     # ← 关键！只允许手动触发
-user-invocable: true                               # 保留在 / 或 $ 菜单里
+description: "提示词工作台：创建、优化或分析提示词。当用户需要从需求创建新提示词、优化改进已有提示词、或分析评估提示词质量时使用。支持参数化快捷指令（如 --optimize trim）。触发词包括：提示词、prompt、创建提示词、优化提示词、分析提示词、改进prompt、写个prompt、元提示词。"
 model: opus
 ---
 
 # 提示词工作台 (Prompt Workbench)
 
+## 参数化执行模式
+
+支持通过 `--{mode} {sub-mode}` 参数快捷调用特定功能，跳过模式检测直接进入执行：
+
+```
+/prompt-assitor --optimize trim    # 精简优化：保持功能不变，重组结构、消除歧义、规范术语
+/prompt-assitor --optimize full    # 完整优化：道·法·术三层深度优化（默认优化模式）
+/prompt-assitor --create           # 创建模式
+/prompt-assitor --analyze          # 分析模式
+```
+
+### 参数解析规则
+
+1. 检测用户输入是否包含 `--` 参数标记
+2. 若包含参数 → 直接路由到对应模式，无需额外确认
+3. 若不包含参数 → 进入下方「模式检测」逻辑
+4. `--optimize` 不带子模式时，默认为 `full`
+
+### `--optimize` 子模式
+
+| 子模式 | 定位 | 参考文档 |
+|--------|------|---------|
+| `trim` | 保持功能不变，专注结构重组、歧义消除、术语规范 | [trim-optimize.md](references/trim-optimize.md) |
+| `full` | 道·法·术三层深度优化，可能重塑核心意图 | [optimize-prompt.md](references/optimize-prompt.md) |
+
 ## 模式检测
+
+当用户未使用参数化指令时，通过以下信号判断模式：
 
 | 模式 | 触发信号 | 参考文档 |
 |------|----------|---------|
