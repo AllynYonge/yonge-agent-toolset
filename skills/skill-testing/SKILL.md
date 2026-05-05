@@ -67,9 +67,23 @@ find "${HERMES_HOME:-$HOME/.hermes}/skills" -name 'SKILL.md' | grep '/<skill-nam
 
 ```bash
 python3 references/dynamic_skill_behavior_harness.py \
-  <spec>.json \
-  --out <report>.json
+  references/specs/<skill>_<scenario>.json \
+  --out references/reports/<skill>_<scenario>_report.json
 ```
+
+## 产出物路径约定
+
+| 类型 | 路径 | 生命周期 |
+|------|------|----------|
+| 行为规范（输入） | `references/specs/<skill>_<scenario>.json` | 永久保留，用于回归 |
+| 测试报告（输出） | `references/reports/<skill>_<scenario>_report.json` | 永久保留，用于诊断 |
+| 临时 HERMES_HOME | 系统 tmpdir（报告中 `hermes_home` 字段） | 默认自动清理；`--keep-home` 保留 |
+
+命名规则：
+- `<skill>`：目标 skill 名称，如 `social-media-creator`
+- `<scenario>`：测试场景简称，如 `bypass-gate`、`missing-input`、`multi-turn`
+
+agent 自动运行时，必须使用 `--out` 参数落盘报告，以便后续诊断步骤读取。
 
 ## 行为规范格式
 
@@ -111,6 +125,16 @@ python3 references/dynamic_skill_behavior_harness.py \
 | `tool_not_called` | `name` | 会话中未调用该工具 |
 
 `target` 可为：`stdout`、`stderr`、`transcript` 或 `all`。
+
+### 匹配语义
+
+所有断言在**整个 blob 文本**上做无序匹配：
+- `contains` / `not_contains`：纯子串查找（`value in text`）
+- `regex` / `not_regex`：`re.search(pattern, text, re.DOTALL)`
+
+**限制**：无法断言出现顺序（如"A 在 B 之前"）。变通方案：
+- 用 `not_regex` 在第一轮排除不该出现的内容（证明 agent 没有跳步）
+- 多轮 case 中，每轮的 stdout 带有 `---TURN N STDOUT---` 分隔标记，可用正则锚定特定轮次
 
 ### 正则书写注意
 
@@ -155,6 +179,30 @@ JSON 中的正则只需一层转义。常见对照：
 5. **回归** — 保留规范文件；针对新发现的失败模式添加用例。
 
 不要为了掩盖行为失败而修改测试。只有当断言本身过于具体时（如要求精确格式而非语义），才放宽断言。
+
+### Agent 自动迭代决策树
+
+当 agent 自动执行此 skill 时，按以下逻辑决策：
+
+```
+读取报告 → success=true? → 结束，输出通过摘要
+                ↓ false
+找到第一个 failed case → 读取其 turns[].stdout 和 assertions[].detail
+                ↓
+判断失败类型：
+  ├─ 断言写法问题（如正则转义错误、匹配了不相关内容）→ 修正规范，重跑
+  ├─ 框架/环境问题（如 timeout、skill 未找到、配置缺失）→ 修复环境，重跑
+  └─ 目标 skill 行为偏差（agent 未遵循 skill 规定的流程）→ patch skill，重跑
+                ↓
+重跑后仍失败？→ 同一 case 最多迭代 3 次
+  ├─ 3 次内通过 → 继续下一个 failed case
+  └─ 3 次仍失败 → 停止，向用户报告失败详情和已尝试的修补
+```
+
+关键原则：
+- 每次只修一个 case，不要批量修补
+- patch 后必须重跑**未修改的规范**验证
+- 如果需要放宽断言，必须说明理由
 
 ## 测试用例设计
 
