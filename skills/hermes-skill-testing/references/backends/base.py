@@ -134,7 +134,18 @@ class AgentBackend:
         raise NotImplementedError
 
     def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
-        raise NotImplementedError(f"semantic assertions are not implemented for backend {self.name!r}")
+        """Return (False, reason) instead of raising so the harness can report a
+        clean assertion failure rather than an unhandled exception.
+
+        Backends that support semantic judging (e.g. Hermes) override this method.
+        For backends that don't (Codex, Claude Code), the assertion is marked as
+        failed with an explanatory message. Use judge_backend="hermes" in the spec
+        to route semantic assertions through Hermes even when testing another backend.
+        """
+        return False, (
+            f"semantic assertions are not supported for backend {self.name!r}; "
+            "set judge_backend=\"hermes\" in the spec to use Hermes as the judge"
+        )
 
 
 class CommandTemplateBackend(AgentBackend):
