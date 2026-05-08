@@ -28,6 +28,8 @@ The harness now dispatches through backend adapters:
 - `codex` and `claude_code` use spec-driven `command_template` execution.
 - Keep backend-specific behavior out of cases; put it in the adapter or the top-level spec.
 
+Adapter files live in `scripts/backends/`. The main harness is `scripts/dynamic_skill_behavior_harness.py`. Always run the harness from the `scripts/` directory so the `backends` package import resolves correctly.
+
 ## Target-skill `test/` artifact layout
 
 Artifacts for a skill behavior test belong under the **target skill being tested**, not under the `skill-testing` skill that owns the harness.

@@ -64,7 +64,7 @@ claude -p --dangerously-skip-permissions "say hello"
 
 ## 测试框架
 
-位于：`references/dynamic_skill_behavior_harness.py`
+位于：`scripts/dynamic_skill_behavior_harness.py`（后端模块在 `scripts/backends/`，文档在 `references/`）
 
 功能：
 
@@ -79,12 +79,15 @@ claude -p --dangerously-skip-permissions "say hello"
 运行方式：
 
 ```bash
+# 必须从 scripts/ 目录运行（backends 包在同级目录）
+cd /path/to/hermes-skill-testing/scripts
+
 # 方式1：按 skill + scenario 名称
-python3 /path/to/skill-testing/references/dynamic_skill_behavior_harness.py \
+python3 dynamic_skill_behavior_harness.py \
   --skill <skill> --scenario <scenario>
 
 # 方式2：显式传入 spec 路径
-python3 /path/to/skill-testing/references/dynamic_skill_behavior_harness.py \
+python3 dynamic_skill_behavior_harness.py \
   /absolute/path/to/<target-skill>/test/specs/<skill>_<scenario>.json
 ```
 
@@ -312,7 +315,9 @@ JSON 中的正则只需一层转义（JSON 解析 `\\` → `\`，Python `re` 再
 
 ## 测试用例设计
 
-测试目标：证明真实 Hermes Agent 在压力输入下仍遵循 skill 的关键规则。
+测试目标：证明真实 agent 在压力输入下仍遵循 skill 的关键规则。
+
+**case 数量没有固定要求**。从 skill 的关键约束出发，每个约束写一个 case；不要为凑数量而添加冗余 case，也不要因为"只有 2 个"而觉得不够。一个 skill 有 2 个核心约束就写 2 个 case，有 8 个就写 8 个。
 
 ### 核心场景维度
 
@@ -360,16 +365,17 @@ JSON 中的正则只需一层转义（JSON 解析 `\\` → `\`，Python `re` 再
 
 ## 修补目标 Skill
 
-使用 `skill_manage(action='patch')` 工具调用：
+直接用文件编辑工具修改目标 skill 的 `SKILL.md`（或 `AGENTS.md`）。修改后同步到对应 backend home 的 `skills/` 目录，再重跑测试。
 
-```python
-skill_manage(
-  action="patch",
-  name="social-media-creator",
-  old_string="old exact block",
-  new_string="new exact block"
-)
+```bash
+# 修改后同步到 claude home（claude_code 后端）
+cp /path/to/skill/SKILL.md ~/.claude/skills/<skill-name>/SKILL.md
+
+# 同步到 codex home
+cp /path/to/skill/SKILL.md ~/.codex/skills/<skill-name>/SKILL.md
 ```
+
+> Hermes 环境下也可以使用 `skill_manage(action='patch', ...)` 工具，但这是 Hermes 专有工具，Codex 和 Claude Code 环境下不可用。
 
 常见有效修补模式：
 
