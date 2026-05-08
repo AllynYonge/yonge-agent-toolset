@@ -18,3 +18,18 @@ Use this note to keep Hermes, Codex, and Claude Code behavior tests aligned.
 ## Maintenance rule
 
 If a backend needs different session capture, add that logic to the adapter rather than the shared evaluator.
+
+## Claude Code — known constraints
+
+### Slash command routing
+`claude -p "/skill-name ..."` is intercepted by Claude Code's slash command router **before** the LLM sees the prompt. If the skill name does not match a registered skill, the CLI returns `"Unknown skill: <name>"` immediately.
+
+**Consequence**: test prompts for claude_code must use natural language, not `/skill-name` prefixes. For example, use `"analyze my Obsidian notes"` instead of `"/wiki analyze my notes"`.
+
+### Working directory sandbox
+`claude -p` runs with a restricted working directory (the harness `cwd`). Paths outside that directory (e.g. `/tmp/...`) may be rejected with a permission/access error before the skill's gate logic can execute.
+
+**Consequence**: test vault paths in specs must be absolute paths inside the harness working directory, or inside a directory that claude is allowed to access. Use a subdirectory of the harness `references/` folder as a test fixture (e.g. `references/test-vault/`) rather than `/tmp/` paths.
+
+### Semantic judge
+`claude_code` backend does not implement `run_semantic_judge`. Avoid `semantic`/`not_semantic` assertions in claude_code specs, or set `judge_backend: "hermes"` and ensure Hermes is available.
