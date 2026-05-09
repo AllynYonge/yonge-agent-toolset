@@ -11,13 +11,16 @@ Use this note to keep Hermes, Codex, and Claude Code behavior tests aligned.
 ## Default assumptions
 
 - `hermes` backend remains the canonical implementation.
-- `codex` backend defaults to `codex exec {prompt}`.
-- `claude_code` backend defaults to `claude -p {prompt}`.
+- `codex` backend defaults to native session mode: `codex exec --json {prompt}` then `codex exec resume <thread_id> {prompt}`.
+- `claude_code` backend defaults to native session mode: `claude -p --session-id <uuid> {prompt}` then `claude -p --resume <uuid> {prompt}`.
 - Use `judge_backend` if you want semantic assertions to run through a different backend than the tested one.
+- Use `conversation_mode: "isolated"` only when a test intentionally needs independent one-prompt processes or a custom `command_template`.
 
 ## Maintenance rule
 
 If a backend needs different session capture, add that logic to the adapter rather than the shared evaluator.
+
+Native session adapters must record the active session id in `CaseState.session_id` so the report can show it under each turn.
 
 ## Claude Code — known constraints
 

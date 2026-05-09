@@ -1,8 +1,9 @@
 """Codex CLI backend for skill behavior tests.
 
-Default template uses `codex exec --dangerously-bypass-approvals-and-sandbox`
-for non-interactive, approval-free execution. Override `command_template` in a
-spec if the local Codex CLI uses different flags.
+Default native-session mode uses `codex exec --json` for the first turn and
+`codex exec resume <thread_id>` for later turns. Override `command_template` or
+set `conversation_mode` to `isolated` if the local Codex CLI uses different
+flags or the test intentionally needs independent turns.
 
 Known constraints:
 - Codex reads config from CODEX_HOME/config.toml; prepare_home() inherits it.
@@ -14,11 +15,14 @@ Known constraints:
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
-from .base import CommandTemplateBackend
+from .base import CaseState, CommandTemplateBackend, TurnResult
 
 
 class CodexBackend(CommandTemplateBackend):
@@ -35,6 +39,26 @@ class CodexBackend(CommandTemplateBackend):
         "{prompt}",
     ]
 
+    def conversation_mode(self, spec: dict[str, Any], case: dict[str, Any]) -> str:
+        if case.get(self.command_template_key) or spec.get(self.command_template_key):
+            return "isolated"
+        return str(case.get("conversation_mode") or spec.get("conversation_mode") or "native_session")
+
+    def _add_model_flags(self, cmd: list[str], spec: dict[str, Any], case: dict[str, Any]) -> None:
+        model = case.get("model") or spec.get("model")
+        if model:
+            cmd += ["-m", str(model)]
+
+    def _extract_thread_id(self, text: str) -> str | None:
+        for line in text.splitlines():
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            if obj.get("type") == "thread.started" and obj.get("thread_id"):
+                return str(obj["thread_id"])
+        return None
+
     def prepare_home(self, home: Path, spec: dict[str, Any]) -> None:
         home.mkdir(parents=True, exist_ok=True)
         if not spec.get("inherit_runtime_config", True):
@@ -45,3 +69,77 @@ class CodexBackend(CommandTemplateBackend):
             src = real_home / name
             if src.exists():
                 shutil.copy2(src, home / name)
+
+    def run_turn(
+        self,
+        prompt: str,
+        *,
+        index: int,
+        spec: dict[str, Any],
+        case: dict[str, Any],
+        state: CaseState,
+        home: Path,
+        env: dict[str, str],
+        timeout: int,
+    ) -> TurnResult:
+        if self.conversation_mode(spec, case) == "isolated":
+            return super().run_turn(
+                prompt,
+                index=index,
+                spec=spec,
+                case=case,
+                state=state,
+                home=home,
+                env=env,
+                timeout=timeout,
+            )
+
+        if index == 0:
+            cmd = [
+                "codex",
+                "exec",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+            ]
+            self._add_model_flags(cmd, spec, case)
+            cmd.append(prompt)
+        else:
+            if not state.session_id:
+                return TurnResult(
+                    prompt,
+                    [],
+                    1,
+                    "",
+                    "native_session mode requires a Codex thread_id captured from the previous turn",
+                    "session_id",
+                )
+            cmd = [
+                "codex",
+                "exec",
+                "resume",
+                "--json",
+                "--dangerously-bypass-approvals-and-sandbox",
+            ]
+            self._add_model_flags(cmd, spec, case)
+            cmd += [state.session_id, prompt]
+
+        try:
+            cp = subprocess.run(
+                cmd,
+                cwd=str(Path(os.environ.get("AGENT_TEST_CWD", os.getcwd()))),
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired as e:
+            return TurnResult(prompt, cmd, -1, e.stdout or "", f"{e.stderr or ''}\n[TIMEOUT] Process exceeded {timeout}s", "timeout")
+
+        thread_id = self._extract_thread_id((cp.stdout or "") + "\n" + (cp.stderr or ""))
+        if thread_id:
+            state.session_id = thread_id
+        if len(case.get("turns", [])) > 1 and not state.session_id:
+            stderr = (cp.stderr or "") + "\n[SESSION] Codex did not emit a thread.started thread_id; cannot resume later turns"
+            return TurnResult(prompt, cmd, cp.returncode or 1, cp.stdout or "", stderr, "session_id")
+        return TurnResult(prompt, cmd, cp.returncode, cp.stdout or "", cp.stderr or "")

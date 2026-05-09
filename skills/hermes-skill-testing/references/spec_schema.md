@@ -24,6 +24,7 @@ Use this file when writing or reviewing a behavior test spec.
 | `model` | — | Model name; passed as `--model` (Hermes) or `-m` (Codex) |
 | `provider` | — | Provider name; passed as `--provider` (Hermes only) |
 | `judge_backend` | `hermes` | Backend used for `semantic`/`not_semantic` assertions |
+| `conversation_mode` | `native_session` | `native_session` for real multi-turn resume; `isolated` for independent one-prompt processes |
 | `command_template` | backend default | Command template for Codex/Claude Code backends |
 | `inherit_runtime_config` | `true` | Inherit config/credentials from the real backend home |
 
@@ -36,6 +37,7 @@ Use this file when writing or reviewing a behavior test spec.
 | `assertions` | List of assertion objects |
 | `model` / `provider` | Override top-level model/provider for this case |
 | `timeout` | Override top-level timeout for this case |
+| `conversation_mode` | Override top-level conversation mode for this case |
 
 ## Command template tokens
 
@@ -52,6 +54,17 @@ Use this file when writing or reviewing a behavior test spec.
 | `hermes` | native `hermes chat -q` (not a command template) |
 | `codex` | `["codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "{prompt}"]` |
 | `claude_code` | `["claude", "-p", "--dangerously-skip-permissions", "{prompt}"]` |
+
+The default Codex and Claude Code adapters use native session resume when no
+`command_template` is supplied:
+
+| Backend | Native first turn | Native later turns |
+|---|---|---|
+| `codex` | `codex exec --json --dangerously-bypass-approvals-and-sandbox <prompt>` | `codex exec resume --json --dangerously-bypass-approvals-and-sandbox <thread_id> <prompt>` |
+| `claude_code` | `claude -p --output-format json --dangerously-skip-permissions --session-id <uuid> <prompt>` | `claude -p --output-format json --dangerously-skip-permissions --resume <uuid> <prompt>` |
+
+Set `conversation_mode` to `isolated` or provide `command_template` to preserve
+the older independent-process behavior.
 
 ## Assertion types
 

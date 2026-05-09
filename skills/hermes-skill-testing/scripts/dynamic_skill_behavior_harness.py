@@ -149,13 +149,19 @@ def run_case(
             timeout=timeout,
         )
         if result.error == "timeout":
-            turns.append(result.as_dict())
+            turn_data = result.as_dict()
+            if state.session_id:
+                turn_data["session_id"] = state.session_id
+            turns.append(turn_data)
             exit_codes.append(-1)
             blob["stdout"] += f"\n---TURN {index + 1} STDOUT---\n{result.stdout}"
             blob["stderr"] += f"\n---TURN {index + 1} STDERR---\n{result.stderr}"
             blob["exit_code"] = "-1"
             break
-        turns.append(result.as_dict())
+        turn_data = result.as_dict()
+        if state.session_id:
+            turn_data["session_id"] = state.session_id
+        turns.append(turn_data)
         exit_codes.append(result.exit_code)
         blob["stdout"] += f"\n---TURN {index + 1} STDOUT---\n{result.stdout}"
         blob["stderr"] += f"\n---TURN {index + 1} STDERR---\n{result.stderr}"

@@ -25,7 +25,9 @@ Implementation pattern:
 The harness now dispatches through backend adapters:
 
 - `hermes` uses the native `hermes chat -q` flow.
-- `codex` and `claude_code` use spec-driven `command_template` execution.
+- `codex` uses native non-interactive resume by default: first turn parses `thread.started.thread_id` from `codex exec --json`, later turns call `codex exec resume <thread_id>`.
+- `claude_code` uses native non-interactive resume by default: first turn passes a generated `--session-id <uuid>`, later turns pass `--resume <uuid>`.
+- `codex` and `claude_code` fall back to spec-driven `command_template` execution only when `conversation_mode` is `isolated` or a custom `command_template` is present.
 - Keep backend-specific behavior out of cases; put it in the adapter or the top-level spec.
 
 Adapter files live in `scripts/backends/`. The main harness is `scripts/dynamic_skill_behavior_harness.py`. Always run the harness from the `scripts/` directory so the `backends` package import resolves correctly.
