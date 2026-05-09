@@ -13,7 +13,7 @@ Use this note to keep Hermes, Codex, and Claude Code behavior tests aligned.
 - `hermes` backend remains the canonical implementation.
 - `codex` backend defaults to native session mode: `codex exec --json {prompt}` then `codex exec resume <thread_id> {prompt}`.
 - `claude_code` backend defaults to native session mode: `claude -p --session-id <uuid> {prompt}` then `claude -p --resume <uuid> {prompt}`.
-- Use `judge_backend` if you want semantic assertions to run through a different backend than the tested one.
+- Semantic assertions default to the tested backend. Use `judge_backend` only when you want semantic assertions to run through a different backend than the tested one.
 - Use `conversation_mode: "isolated"` only when a test intentionally needs independent one-prompt processes or a custom `command_template`.
 
 ## Maintenance rule
@@ -35,4 +35,4 @@ Native session adapters must record the active session id in `CaseState.session_
 **Consequence**: test vault paths in specs must be absolute paths inside the harness working directory, or inside a directory that claude is allowed to access. Use a subdirectory of the harness `references/` folder as a test fixture (e.g. `references/test-vault/`) rather than `/tmp/` paths.
 
 ### Semantic judge
-`claude_code` backend does not implement `run_semantic_judge`. Avoid `semantic`/`not_semantic` assertions in claude_code specs, or set `judge_backend: "hermes"` and ensure Hermes is available.
+`claude_code` implements `run_semantic_judge` through a separate `claude -p --output-format json` turn. `codex` implements it through `codex exec --json`. Both judges expect strict `{"passed": true|false, "reason": "..."}` output and fall back to extracting the first JSON object if the model adds surrounding text.

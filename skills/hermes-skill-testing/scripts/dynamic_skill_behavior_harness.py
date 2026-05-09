@@ -222,7 +222,7 @@ def main() -> int:
 
     if "backend" in spec:
         backend = get_backend(spec.get("backend"))
-    judge_backend = get_backend(spec.get("judge_backend", "hermes"))
+    judge_backend = get_backend(spec.get("judge_backend") or backend.name)
 
     test_root = backend.target_test_root(spec)
     home = backend.make_temp_home(test_root)

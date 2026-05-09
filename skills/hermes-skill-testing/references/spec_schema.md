@@ -23,7 +23,7 @@ Use this file when writing or reviewing a behavior test spec.
 | `related_skills` | `[]` | Extra skills to copy into the temp home |
 | `model` | — | Model name; passed as `--model` (Hermes) or `-m` (Codex) |
 | `provider` | — | Provider name; passed as `--provider` (Hermes only) |
-| `judge_backend` | `hermes` | Backend used for `semantic`/`not_semantic` assertions |
+| `judge_backend` | tested backend | Backend used for `semantic`/`not_semantic` assertions; set only when judging with a different backend |
 | `conversation_mode` | `native_session` | `native_session` for real multi-turn resume; `isolated` for independent one-prompt processes |
 | `command_template` | backend default | Command template for Codex/Claude Code backends |
 | `inherit_runtime_config` | `true` | Inherit config/credentials from the real backend home |
@@ -75,8 +75,8 @@ the older independent-process behavior.
 | `not_contains` | `target`, `value` | Literal substring absence |
 | `regex` | `target`, `pattern` | `re.search` with `DOTALL`; one layer of JSON escaping |
 | `not_regex` | `target`, `pattern` | Absence of regex match |
-| `semantic` | `target`, `rubric` | LLM judge; requires `judge_backend` to be available |
-| `not_semantic` | `target`, `rubric` | Negated LLM judge |
+| `semantic` | `target`, `rubric` | LLM judge through `judge_backend` or the tested backend by default |
+| `not_semantic` | `target`, `rubric` | Negated LLM judge through `judge_backend` or the tested backend by default |
 | `tool_called` | `name` | Tool name appears in transcript/stdout heuristic |
 | `tool_not_called` | `name` | Tool name absent from transcript/stdout |
 

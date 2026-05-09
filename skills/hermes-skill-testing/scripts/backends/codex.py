@@ -9,8 +9,7 @@ Known constraints:
 - Codex reads config from CODEX_HOME/config.toml; prepare_home() inherits it.
 - `--dangerously-bypass-approvals-and-sandbox` is required to avoid interactive
   approval prompts during automated test runs.
-- Semantic assertions are not natively supported; set judge_backend="hermes" in
-  the spec if Hermes is available, otherwise avoid semantic/not_semantic assertions.
+- Semantic assertions are judged through a separate `codex exec --json` turn.
 """
 
 from __future__ import annotations
@@ -58,6 +57,31 @@ class CodexBackend(CommandTemplateBackend):
             if obj.get("type") == "thread.started" and obj.get("thread_id"):
                 return str(obj["thread_id"])
         return None
+
+    def _extract_agent_text(self, text: str) -> str:
+        chunks: list[str] = []
+        for line in text.splitlines():
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            item = obj.get("item")
+            if isinstance(item, dict) and item.get("type") == "agent_message" and item.get("text"):
+                chunks.append(str(item["text"]))
+        return "\n".join(chunks) or text
+
+    def semantic_prompt(self, assertion: dict[str, Any], text: str) -> str:
+        rubric = assertion.get("rubric") or assertion.get("criteria") or assertion.get("value") or assertion.get("claim")
+        if not rubric:
+            raise ValueError("semantic assertion requires rubric/criteria/value/claim")
+        return (
+            "You are a strict behavior-test judge for an agent skill. "
+            "Return only JSON, with no markdown or explanation outside JSON.\n"
+            "Decide whether the candidate output satisfies the test criterion.\n"
+            "Required format: {\"passed\": true|false, \"reason\": \"one short reason\"}\n\n"
+            f"Test criterion:\n{rubric}\n\n"
+            f"Candidate output:\n{text[:12000]}\n"
+        )
 
     def prepare_home(self, home: Path, spec: dict[str, Any]) -> None:
         home.mkdir(parents=True, exist_ok=True)
@@ -143,3 +167,47 @@ class CodexBackend(CommandTemplateBackend):
             stderr = (cp.stderr or "") + "\n[SESSION] Codex did not emit a thread.started thread_id; cannot resume later turns"
             return TurnResult(prompt, cmd, cp.returncode or 1, cp.stdout or "", stderr, "session_id")
         return TurnResult(prompt, cmd, cp.returncode, cp.stdout or "", cp.stderr or "")
+
+    def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+        cmd = [
+            "codex",
+            "exec",
+            "--json",
+            "--dangerously-bypass-approvals-and-sandbox",
+        ]
+        judge_model = assertion.get("judge_model")
+        if judge_model:
+            cmd += ["-m", str(judge_model)]
+        cmd.append(self.semantic_prompt(assertion, text))
+        try:
+            cp = subprocess.run(
+                cmd,
+                cwd=str(Path(os.environ.get("AGENT_TEST_CWD", os.getcwd()))),
+                env=env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=int(assertion.get("timeout", timeout)),
+            )
+        except subprocess.TimeoutExpired as e:
+            raw = f"{e.stdout or ''}\n{e.stderr or ''}"
+            return False, f"semantic judge timeout after {int(assertion.get('timeout', timeout))}s: {raw[-500:]}"
+        raw = (cp.stdout or "") + "\n" + (cp.stderr or "")
+        if cp.returncode != 0:
+            return False, f"semantic judge exited {cp.returncode}: {raw[-500:]}"
+        answer = self._extract_agent_text(raw)
+        try:
+            obj = json.loads(answer)
+        except Exception:
+            import re
+
+            match = re.search(r"\{.*\}", answer, re.S)
+            if not match:
+                return False, f"semantic judge returned non-JSON: {answer[-500:]}"
+            try:
+                obj = json.loads(match.group(0))
+            except Exception as e:
+                return False, f"semantic judge JSON parse failed: {e}; raw={answer[-500:]}"
+        passed = bool(obj.get("passed"))
+        reason = str(obj.get("reason", ""))
+        return passed, reason or f"semantic judge passed={passed}"

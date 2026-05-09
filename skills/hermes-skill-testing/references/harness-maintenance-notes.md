@@ -15,7 +15,7 @@ The harness supports LLM-judged assertions for cases where keyword/regex matchin
 ```
 
 Implementation pattern:
-- `semantic` / `not_semantic` call the backend's judge turn.
+- `semantic` / `not_semantic` call the selected judge backend's judge turn. If the spec omits `judge_backend`, the tested backend judges its own output.
 - The judge prompt must demand strict JSON: `{"passed": true|false, "reason": "..."}`.
 - Treat semantic assertions as quality/meaning checks, not the sole guard for critical gates; pair them with deterministic `contains` / `regex` / `not_regex` assertions where possible.
 - Expect extra LLM cost and some nondeterminism.
@@ -78,7 +78,7 @@ hermes chat -q "..." --model <model> --provider <provider>
 Harness specs should support this at three levels:
 - top-level `model` / `provider`: default for all tested cases;
 - per-case `model` / `provider`: overrides the top-level values for that case;
-- semantic assertion `judge_model` / `judge_provider`: separate model/provider for the LLM judge.
+- semantic assertion `judge_model` / `judge_provider`: separate model/provider for the LLM judge. `judge_provider` is currently Hermes-specific; Codex and Claude Code use `judge_model`.
 
 Use this to run cheap/fast smoke tests without changing the user's global Hermes config.
 
