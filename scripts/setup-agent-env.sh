@@ -3,7 +3,7 @@
 # Usage: ./scripts/setup-agent-env.sh <target-folder>
 #
 # Creates .codex/ and .claude/ under the target folder,
-# then copies CLAUDE.md and AGENTS.md from the repo root.
+# then symlinks CLAUDE.md and AGENTS.md from the repo root.
 
 set -euo pipefail
 
@@ -44,12 +44,12 @@ echo "Created: $TARGET/.codex"
 mkdir -p "$TARGET/.claude"
 echo "Created: $TARGET/.claude"
 
-# ── Copy files ────────────────────────────────────────────────────────────────
-cp "$CLAUDE_MD" "$TARGET/.claude/CLAUDE.md"
-echo "Copied:  CLAUDE.md  →  $TARGET/.claude/CLAUDE.md"
+# ── Symlink files ─────────────────────────────────────────────────────────────
+ln -sf "$CLAUDE_MD" "$TARGET/.claude/CLAUDE.md"
+echo "Linked:  CLAUDE.md  →  $TARGET/.claude/CLAUDE.md"
 
-cp "$AGENTS_MD" "$TARGET/AGENTS.md"
-echo "Copied:  AGENTS.md  →  $TARGET/AGENTS.md"
+ln -sf "$AGENTS_MD" "$TARGET/AGENTS.md"
+echo "Linked:  AGENTS.md  →  $TARGET/AGENTS.md"
 
 echo ""
 echo "Done. Agent environment initialized at: $TARGET"
