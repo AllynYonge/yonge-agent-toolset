@@ -6,15 +6,19 @@ model: opus
 
 # 提示词工作台 (Prompt Workbench)
 
+## 命名与入口
+
+本技能统一使用 `prompt-assitor` 作为技能名和快捷入口。旧文档中出现的 `prompt-assistor` 仅视为历史拼写，不再作为标准写法。
+
 ## 参数化执行模式
 
 支持通过 `--{mode}` 参数快捷调用特定功能，跳过模式检测直接进入执行：
 
 ```
-/prompt-assistor --rewrite         # 交互式重写：分析问题 → 用户选择维度 → 针对性优化
-/prompt-assistor --optimize        # 道·法·术三层深度优化（默认优化模式）
-/prompt-assistor --create          # 创建模式
-/prompt-assistor --analyze         # 分析模式
+/prompt-assitor --rewrite         # 交互式重写：分析问题 → 用户选择维度 → 针对性优化
+/prompt-assitor --optimize        # 道·法·术三层深度优化（默认优化模式）
+/prompt-assitor --create          # 创建模式
+/prompt-assitor --analyze         # 分析模式
 ```
 
 ### 参数解析规则
@@ -31,7 +35,7 @@ model: opus
 |------|----------|---------|
 | **创建** | "帮我写/创建/生成一个提示词"、提供需求描述但无已有提示词 | [create-prompt.md](references/create-prompt.md) |
 | **优化** | "帮我优化/改进/修改这个提示词"、提供已有提示词 + 改进要求 | [optimize-prompt.md](references/optimize-prompt.md) |
-| **重写** | "帮我重写/精简/整理这个提示词"、要求保持功能不变但改善表达 | [optimize-trim-prompt.md](references/optimize-trim-prompt.md) |
+| **重写** | "帮我重写/精简/整理这个提示词"、要求保持功能不变但改善表达 | [rewrite-prompt.md](references/rewrite-prompt.md) |
 | **分析** | "帮我分析/评估/拆解这个提示词"、要求理解提示词设计 | [analyze-prompt.md](references/analyze-prompt.md) |
 
 无法判断时，询问用户。确定模式后，阅读对应参考文档获取详细方法论。
@@ -69,13 +73,20 @@ model: opus
 
 交互式精准重写：先诊断问题，再由用户选择优化维度，最后针对性执行。
 
-**参考文档**：[optimize-trim-prompt.md](references/optimize-trim-prompt.md)
+**参考文档**：[rewrite-prompt.md](references/rewrite-prompt.md)
+
+### 与优化模式的边界
+
+| 模式 | 可改变的内容 | 不可改变的内容 |
+|------|--------------|----------------|
+| **重写** | 表达方式、段落结构、术语一致性、歧义、冗余、格式规范 | 核心意图、任务范围、关键约束、输出规格的本质 |
+| **优化** | 核心目标、策略框架、交互模式、约束体系、输出结构 | 用户明确要求保留的业务边界和硬性限制 |
 
 ### 工作流
 
 #### 步骤1：功能基线提取与问题诊断
 
-按 [optimize-trim-prompt.md](references/optimize-trim-prompt.md) 的步骤1-2 执行：
+按 [rewrite-prompt.md](references/rewrite-prompt.md) 的步骤1-2 执行：
 1. 提取核心意图、功能清单、约束清单、输出规格
 2. 从结构、歧义、冗余、规范四个维度诊断问题
 
@@ -105,7 +116,7 @@ model: opus
 
 #### 步骤3：针对性执行重写
 
-仅对用户选定的维度执行优化操作，严格遵循 [optimize-trim-prompt.md](references/optimize-trim-prompt.md) 的约束边界（不改变功能和意图）。
+仅对用户选定的维度执行优化操作，严格遵循 [rewrite-prompt.md](references/rewrite-prompt.md) 的约束边界（不改变功能和意图）。
 
 #### 步骤4：基线验证
 
@@ -148,13 +159,17 @@ model: opus
 ### 输出格式
 
 ```xml
-<thinking>
-[道法术三层完整分析过程]
-</thinking>
+<analysis_summary>
+[简要说明核心判断、关键问题和优化方向]
+</analysis_summary>
 
 <optimized_prompt>
 [优化后完整提示词]
 </optimized_prompt>
+
+<verification>
+[简短核对目标、约束、输出格式和风险边界]
+</verification>
 ```
 
 ## 分析模式
@@ -202,5 +217,13 @@ model: opus
 2. **结构化强制**：清晰模块 + XML标签 + 明确格式
 3. **信息密度最大化**：精炼高效，无废话
 4. **约束完备**：正向约束 + 负向约束
-5. **推理先于输出**：先 `<thinking>` 后 `<answer>`
+5. **内部推理先于输出**：复杂任务先在内部完成分析、规划和自检；不要输出完整思维链，只输出必要的分析摘要、依据摘要或验证结果
 6. **所有输出为中文**
+
+## 模型适配规则
+
+| 目标模型/场景 | 推荐结构 | 推理与输出规则 |
+|---------------|----------|----------------|
+| **Claude** | 优先使用 XML 标签分隔 `<instructions>`、`<context>`、`<examples>`、`<answer>` | 可要求内部深入思考，但默认不输出完整思维链；输出摘要和结论 |
+| **OpenAI** | Markdown 标题、XML 标签、结构化输出均可；需要机器读取时优先 JSON/structured outputs | 对 reasoning 模型给目标、约束和验收标准，不强制长 CoT；对普通模型可要求分步骤处理但只展示摘要 |
+| **通用模型** | 角色、任务、上下文、约束、输出格式五段式 | 保持指令短、明确、可验证；避免依赖模型私有能力或不可见参数 |
