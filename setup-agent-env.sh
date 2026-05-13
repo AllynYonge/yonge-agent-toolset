@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # setup-agent-env.sh
-# Usage: ./scripts/setup-agent-env.sh <target-folder>
+# Usage: ./setup-agent-env.sh <target-folder>
 #
 # Creates .codex/ and .claude/ under the target folder,
 # then symlinks CLAUDE.md and AGENTS.md from the repo root.
@@ -20,9 +20,9 @@ if [[ ! -d "$TARGET" ]]; then
   exit 1
 fi
 
-# ── Resolve script's own directory (repo root assumed to be the same dir) ────
+# ── Resolve script's own directory (= repo root) ─────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$SCRIPT_DIR"
 
 CLAUDE_MD="$REPO_ROOT/CLAUDE.md"
 AGENTS_MD="$REPO_ROOT/AGENTS.md"
