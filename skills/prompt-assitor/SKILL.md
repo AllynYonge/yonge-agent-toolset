@@ -1,6 +1,6 @@
 ---
 name: prompt-assitor
-description: "提示词工作台：创建、优化或分析提示词。当用户需要从需求创建新提示词、优化改进已有提示词、或分析评估提示词质量时使用。支持参数化快捷指令（如 --optimize trim）。触发词包括：提示词、prompt、创建提示词、优化提示词、分析提示词、改进prompt、写个prompt、元提示词。"
+description: "创建、优化、重写或分析提示词。当用户需要从需求创建新提示词、优化改进已有提示词、交互式重写提示词、或分析评估提示词质量时使用。支持参数化快捷指令（如 --rewrite、--optimize）。触发词包括：提示词、prompt、创建提示词、优化提示词、重写提示词、分析提示词、改进prompt、写个prompt、元提示词。"
 model: opus
 ---
 
@@ -8,13 +8,13 @@ model: opus
 
 ## 参数化执行模式
 
-支持通过 `--{mode} {sub-mode}` 参数快捷调用特定功能，跳过模式检测直接进入执行：
+支持通过 `--{mode}` 参数快捷调用特定功能，跳过模式检测直接进入执行：
 
 ```
-/prompt-assitor --optimize trim    # 精简优化：保持功能不变，重组结构、消除歧义、规范术语
-/prompt-assitor --optimize full    # 完整优化：道·法·术三层深度优化（默认优化模式）
-/prompt-assitor --create           # 创建模式
-/prompt-assitor --analyze          # 分析模式
+/prompt-assistor --rewrite         # 交互式重写：分析问题 → 用户选择维度 → 针对性优化
+/prompt-assistor --optimize        # 道·法·术三层深度优化（默认优化模式）
+/prompt-assistor --create          # 创建模式
+/prompt-assistor --analyze         # 分析模式
 ```
 
 ### 参数解析规则
@@ -22,14 +22,6 @@ model: opus
 1. 检测用户输入是否包含 `--` 参数标记
 2. 若包含参数 → 直接路由到对应模式，无需额外确认
 3. 若不包含参数 → 进入下方「模式检测」逻辑
-4. `--optimize` 不带子模式时，默认为 `full`
-
-### `--optimize` 子模式
-
-| 子模式 | 定位 | 参考文档 |
-|--------|------|---------|
-| `trim` | 保持功能不变，专注结构重组、歧义消除、术语规范 | [trim-optimize.md](references/trim-optimize.md) |
-| `full` | 道·法·术三层深度优化，可能重塑核心意图 | [optimize-prompt.md](references/optimize-prompt.md) |
 
 ## 模式检测
 
@@ -39,6 +31,7 @@ model: opus
 |------|----------|---------|
 | **创建** | "帮我写/创建/生成一个提示词"、提供需求描述但无已有提示词 | [create-prompt.md](references/create-prompt.md) |
 | **优化** | "帮我优化/改进/修改这个提示词"、提供已有提示词 + 改进要求 | [optimize-prompt.md](references/optimize-prompt.md) |
+| **重写** | "帮我重写/精简/整理这个提示词"、要求保持功能不变但改善表达 | [optimize-trim-prompt.md](references/optimize-trim-prompt.md) |
 | **分析** | "帮我分析/评估/拆解这个提示词"、要求理解提示词设计 | [analyze-prompt.md](references/analyze-prompt.md) |
 
 无法判断时，询问用户。确定模式后，阅读对应参考文档获取详细方法论。
@@ -82,6 +75,74 @@ model: opus
 [完整可用的提示词]
 </生成的提示词>
 ```
+
+## 重写模式 (--rewrite)
+
+交互式精准重写：先诊断问题，再由用户选择优化维度，最后针对性执行。
+
+**参考文档**：[optimize-trim-prompt.md](references/optimize-trim-prompt.md)
+
+### 工作流
+
+#### 步骤1：功能基线提取与问题诊断
+
+按 [optimize-trim-prompt.md](references/optimize-trim-prompt.md) 的步骤1-2 执行：
+1. 提取核心意图、功能清单、约束清单、输出规格
+2. 从结构、歧义、冗余、规范四个维度诊断问题
+
+#### 步骤2：交互式维度选择（必须等待用户确认后再执行）
+
+基于诊断结果，向用户展示可选的重写维度清单。格式如下：
+
+```markdown
+根据分析，当前提示词存在以下可优化维度：
+
+| # | 维度 | 发现的问题 | 预期效果 |
+|---|------|-----------|----------|
+| 1 | 结构重组 | [具体问题摘要] | [优化后预期] |
+| 2 | 歧义消除 | [具体问题摘要] | [优化后预期] |
+| 3 | 冗余精简 | [具体问题摘要] | [优化后预期] |
+| 4 | 术语规范 | [具体问题摘要] | [优化后预期] |
+| 5 | 逻辑矛盾修正 | [具体问题摘要] | [优化后预期] |
+| 6 | 语言风格统一 | [具体问题摘要] | [优化后预期] |
+
+请选择要执行的维度（支持多选，如 `1,3,4` 或 `all`）：
+```
+
+**规则**：
+- 仅展示实际存在问题的维度（无问题的维度不列出）
+- 每个维度的「发现的问题」必须引用原文具体证据
+- 等待用户回复选择后，方可进入步骤3
+
+#### 步骤3：针对性执行重写
+
+仅对用户选定的维度执行优化操作，严格遵循 [optimize-trim-prompt.md](references/optimize-trim-prompt.md) 的约束边界（不改变功能和意图）。
+
+#### 步骤4：基线验证
+
+逐项核对步骤1提取的功能基线，确保优化后未丢失任何功能或约束。
+
+### 输出格式
+
+```xml
+<rewrite_analysis>
+[步骤1-2 的诊断结果 + 维度选择表]
+</rewrite_analysis>
+
+<!-- 用户选择后 -->
+
+<rewritten_prompt>
+[仅针对选定维度优化后的完整提示词]
+</rewritten_prompt>
+
+<change_log>
+| 维度 | 修改内容 | 原文 → 新文 |
+|------|---------|------------|
+| ... | ... | ... |
+</change_log>
+```
+
+---
 
 ## 优化模式 (快速指引)
 
