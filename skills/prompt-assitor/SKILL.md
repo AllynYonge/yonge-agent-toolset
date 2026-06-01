@@ -44,7 +44,7 @@ model: opus
 
 从需求出发构建完整可用的提示词。
 
-**参考文档**：[create-prompt.md](references/create-prompt.md)
+**必须参考文档**：[create-prompt.md](references/create-prompt.md)
 
 ### 工作流
 
@@ -59,7 +59,7 @@ model: opus
 
 交互式精准重写：先诊断问题，再由用户选择优化维度，最后针对性执行。
 
-**参考文档**：[rewrite-prompt.md](references/rewrite-prompt.md)
+**必须参考文档**：[rewrite-prompt.md](references/rewrite-prompt.md)
 
 ### 与优化模式的边界
 
@@ -101,7 +101,7 @@ model: opus
 
 道·法·术三层深度优化，可能重塑核心意图。
 
-**参考文档**：[optimize-prompt.md](references/optimize-prompt.md)
+**必须参考文档**：[optimize-prompt.md](references/optimize-prompt.md)
 
 ### 工作流
 
@@ -116,7 +116,7 @@ model: opus
 
 解构、评估和提炼目标提示词中的设计智慧，沉淀可复用方法论。
 
-**参考文档**：[analyze-prompt.md](references/analyze-prompt.md)
+**必须参考文档**：[analyze-prompt.md](references/analyze-prompt.md)
 
 ### 工作流
 
@@ -126,15 +126,6 @@ model: opus
 4. 提炼可复用方法论
 
 输出格式按 [analyze-prompt.md](references/analyze-prompt.md) 的「分析报告格式」执行。
-
-## 核心质量标准（所有模式共享）
-
-1. **第一性原理**：穿透表面直击底层需求
-2. **结构化强制**：清晰模块 + XML标签 + 明确格式
-3. **信息密度最大化**：精炼高效，无废话
-4. **约束完备**：正向约束 + 负向约束
-5. **内部推理先于输出**：复杂任务先在内部完成分析、规划和自检；不要输出完整思维链，只输出必要的分析摘要、依据摘要或验证结果
-6. **所有输出为中文**
 
 ## 目标模型适配
 
@@ -158,3 +149,13 @@ model: opus
 | **Claude** | 用户明确要给 Claude/Anthropic 使用，或原提示词依赖 XML 分区 | 优先使用 XML 标签分隔 `<instructions>`、`<context>`、`<examples>`、`<answer>` | 可要求内部深入思考，但默认不输出完整思维链；输出摘要和结论 |
 | **OpenAI / ChatGPT** | 用户明确要给 OpenAI、ChatGPT、GPT 或 OpenAI API 使用 | Markdown 标题、XML 标签、结构化输出均可；需要机器读取时优先 JSON/structured outputs | 对 reasoning 模型给目标、约束和验收标准，不强制长 CoT；对普通模型可要求分步骤处理但只展示摘要 |
 | **通用模型** | 用户未指定模型，或提示词需要跨模型复用 | 角色、任务、上下文、约束、输出格式五段式 | 保持指令短、明确、可验证；避免依赖模型私有能力或不可见参数 |
+
+## 必须核心质量标准（所有模式共享）
+
+1. **第一性原理**：穿透表面直击底层需求
+2. **结构化强制**：清晰模块 + XML标签 + 明确格式
+3. **信息密度最大化**：精炼高效，无废话
+4. **约束完备**：正向约束 + 负向约束
+5. **内部推理先于输出**：复杂任务先在内部完成分析、规划和自检；不要输出完整思维链，只输出必要的分析摘要、依据摘要或验证结果
+6. **扩展性与解耦协同**：生成或优化的提示词应使目标技能的各能力模块可独立演进、互不干扰，同时通过明确的输入输出契约实现模块间协作；新增能力时插入成本低，移除能力时不破坏整体
+7. **所有输出为中文**
