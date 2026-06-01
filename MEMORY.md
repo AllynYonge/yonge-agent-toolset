@@ -1,0 +1,2 @@
+- [AGENTS.zh.md 编辑原则](memory/feedback_agents_zh_editing.md) — 修改原则条目时：抽象优于具象，按决策性质分类而非场景枚举
+- [impeccable 先出线框图](memory/feedback_impeccable_wireframe_first.md) — 页面重构/UI重设计必须先 ASCII 线框图确认再实施
