@@ -167,13 +167,13 @@ references/ 文件不需要 YAML 前置元数据，直接用 Markdown 标题开�
 
 ```
 .claude/skills/
-├── {prefix}1-{name}/
+├── {prefix}-{name}/
 │   ├── SKILL.md
 │   ├── references/
 │   │   ├── output-template.md    (产出物格式模板)
 │   │   └── domain-guide.md       (领域方法论参考)
 │   └── scripts/                   (可选)
-├── {prefix}2-{name}/
+├── {prefix}-{name}/
 │   ├── SKILL.md
 │   └── references/
 ├── ...

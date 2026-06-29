@@ -1,0 +1,20 @@
+{
+  "vaultPath": "/Users/mine/GDrive/allyn.yonge/Obsidan_DB/google_obsidian_db",
+  "defaultMode": "hybrid",
+  "defaultScope": "all",
+  "maxResults": 30,
+  "contentExtensions": [".md", ".markdown"],
+  "ignore": [".obsidian/**", ".trash/**", "node_modules/**", "**/.DS_Store"],
+  "followSymlinks": false,
+  "maxFileBytes": 2097152,
+  "workspaceScope": {
+    "enabled": false,
+    "include": [],
+    "exclude": []
+  },
+  "rag": {
+    "enabled": true,
+    "limit": 80,
+    "minSimilarity": 0.35
+  }
+}

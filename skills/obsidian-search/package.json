@@ -1,0 +1,26 @@
+{
+  "name": "obsidian-search",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "obsidian-search": "src/main.ts"
+  },
+  "scripts": {
+    "dev": "bun run src/main.ts",
+    "doctor": "bun run src/main.ts doctor",
+    "search": "bun run src/main.ts search",
+    "daemon": "bun run src/main.ts daemon",
+    "daemon:status": "bun run src/main.ts daemon:status",
+    "daemon:stop": "bun run src/main.ts daemon:stop",
+    "build": "bun build src/main.ts --target=bun --outfile dist/obsidian-search.js",
+    "build:compile": "bun build src/main.ts --compile --outfile obsidian-search",
+    "test": "bun test test/*.test.ts"
+  },
+  "devDependencies": {
+    "bun-types": "latest"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.4.4"
+  }
+}
