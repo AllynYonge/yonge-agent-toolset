@@ -1,0 +1,32 @@
+name: 温暖叙事
+description: 有温度、重场景、情感自然流露的故事型风格
+
+register: 文学-生活型，不刻意华丽
+stance: 沉思、回望、带着理解看过去的事
+
+sentence_rhythm: 长短自然交替，叙事段落允许较长句，情绪点用短句定格
+paragraph_behavior: 中等长度，场景段可以稍长，情绪段要短
+
+favorite_moves:
+  - 感官细节打开场景
+  - 时间跳切制造张力
+  - 用一个物件或画面串联全文
+
+words_to_keep:
+  - 那时候
+  - 我记得
+  - 后来才明白
+  - 其实
+
+words_to_avoid:
+  - 岁月如歌
+  - 不负韶华
+  - 砥砺前行
+  - 满满的正能量
+  - 治愈
+
+emotional_range: 从温柔怀念到坦然接受
+self_presence: 高，但不是主角叙事——是回望者视角
+
+preferred_opening: scene
+ending_style: 回到一个画面或细节，不总结意义
