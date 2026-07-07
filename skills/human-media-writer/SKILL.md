@@ -139,7 +139,15 @@ description: 创建、改写、分析或审核中文自媒体文章，使其在�
 
 ### EXTEND.md 偏好文件
 
-按优先级读取：
+通过脚本解析，不由代理直接读取全文：
+
+```bash
+python3 skills/human-media-writer/scripts/resolve_preferences.py \
+  --workspace-dir "{workspace_dir}" \
+  --profile "profile1|profile2"
+```
+
+脚本内部按优先级读取：
 
 | 优先级 | 路径 | 作用域 |
 |----------|------|-------|
@@ -148,8 +156,10 @@ description: 创建、改写、分析或审核中文自媒体文章，使其在�
 
 | 结果 | 操作 |
 |--------|--------|
-| 找到 | 读取、解析、应用。会话首次使用时简短提醒："Using preferences from [path]." |
+| 找到 | 只应用脚本返回的 active profile。会话首次使用时简短提醒："Using preferences from [path]." |
 | 未找到 | 使用默认值继续。首个任务完成后提供："要我把这些偏好保存下来，下次自动用？" |
+
+代理只使用 resolver 返回的 JSON：`config_path`、`config_scope`、`available_profiles`、`profiles`、每个 profile 的 `effective_config`、`style`、`style_source`、`avoid_words`、`constraint_check_args`。Never 为了日常写作、改写、分析或审核而直接读取完整 EXTEND.md；只有在创建、编辑或解释 EXTEND.md 本身时才读取配置全文和 schema。
 
 ### 默认值
 
@@ -180,7 +190,7 @@ description: 创建、改写、分析或审核中文自媒体文章，使其在�
 
 ### 多账号支持
 
-用户可通过 `--profile <name>` 或 `--profile=<name>` 切换不同账号配置。
+用户可通过 `--profile <name>` 或 `--profile=<name>` 切换不同账号配置。批量查询多个账号时使用竖线分隔：`--profile "profile1|profile2"`；resolver 会返回多个独立 profile 结果，后续执行时每次只激活其中一个，不混合配置。
 
 **继承规则**：账号中的字段覆盖全局同名字段；账号中未定义的字段回退到全局值，全局未定义则使用内置默认值。每次运行只有一个 active 账号，不会混合多个账号的配置。
 
@@ -188,7 +198,7 @@ description: 创建、改写、分析或审核中文自媒体文章，使其在�
 
 - 加载账号后提醒："Using profile '[name]' from [path]."
 - `--profile` 指定了不存在的名称 → 报错并列出可用账号，不静默回退
-- 无 `--profile` 且无 `default_profile` 且存在多个账号 → 列出可用账号让用户选择
+- 无 `--profile` 且无 `default_profile` 且存在多个账号 → resolver 报错并列出可用账号；向用户确认要使用哪一个
 
 ### 输出长度控制（length）
 
@@ -229,7 +239,7 @@ description: 创建、改写、分析或审核中文自媒体文章，使其在�
 
 ### 代理行为
 
-- **文件读取**：EXTEND.md 所在的 `.human-media-writer/` 是隐藏目录。MUST 使用 `read` 工具直接读取已知路径，Never 使用文件搜索工具（搜索工具可能跳过隐藏目录）。一旦成功读取到高优先级的文件，立即停止后续读取。
+- **配置读取**：EXTEND.md 所在的 `.human-media-writer/` 是隐藏目录，且可能包含多个账号的大量风格资料。日常运行 MUST 调用 `scripts/resolve_preferences.py` 获取 active profile，Never 直接 `read` 完整 EXTEND.md，避免无关账号污染上下文。只有在创建、编辑或解释 EXTEND.md 本身时才读取完整配置文件。
 - **工作目录**：`{workspace_dir}` 是运行时占位符，由代理运行时环境自动替换为当前工作目录的实际路径。无需手动处理。
 - **子代理调度**：本技能中所有"委派审核子代理"均指通过 Agent tool 派发独立子代理实例。创作内容 MUST 使用单代理完成（语气一致性需要一个思维贯穿全文）；审核可委派独立子代理（评估不需要维持创作语气）。Never 向审核子代理传递创作会话历史。
 - **用户提问工具**：需要向用户提问时，使用代理运行时内置的用户输入工具（AskUserQuestion、ask_user、clarify 或等效工具）。如果不存在此类工具，输出纯文本编号列表。尽量合并问题，一次最多问 3 个。
@@ -298,8 +308,7 @@ flowchart TD
 |--------|----------|
 | 公众号/WeChat/微信/长文/深度文章 | 微信 |
 | 小红书/xhs/RED/种草/笔记/分享帖 | 小红书 |
-| 无明确信号 | 默认：微信 |
-| EXTEND.md 中有 `default_platform` | 使用该默认值 |
+| 无明确信号 | active profile 的 `platform`，再无则默认微信 |
 
 其他平台：继续但不应用平台特定规则。
 
@@ -329,18 +338,17 @@ flowchart TD
 
 ### 参考文档加载规则
 
-先确定模式、平台和是否需要配置，再仅读取任务所需的参考文档。写作风格与平台形态已内联在本文件（§写作风格系统、§平台形态），无需外部加载。以下为唯一权威加载清单：
+先确定模式、平台和是否需要配置，再仅读取任务所需的参考文档。写作风格与平台形态已内联在本文件（§写作风格系统、§平台形态）；active profile 与风格参数由 `scripts/resolve_preferences.py` 返回，无需直接读取 EXTEND.md 或风格预设文件。以下为唯一权威加载清单：
 
 | 触发条件 | 文档 |
 |----------|------|
 | 分析模式 | `references/analysis-workflow.md` |
 | 选题模式，或创建/改写中需要前置选题环节 | `references/topic-selection.md` |
 | 去除 AI 味、审核草稿或改写/编写中文文章 | `references/ai-tell-catalog-zh.md` |
-| 使用内置风格预设 | `references/styles/{writing_style}.yaml` |
 | 从话题、笔记、转录稿或素材完整创建文章 | `references/article-workflow.md` |
 | 改写模式 | `references/rewrite-workflow.md` |
 | 审核模式，或创建/改写中委派审核子代理 | `references/reviewer-workflow.md` |
-| 创建、读取或解释 EXTEND.md | `references/config/extend-schema.md` |
+| 创建、编辑或解释 EXTEND.md | `references/config/extend-schema.md` |
 | 首次使用后保存偏好 | `references/config/first-use-setup.md` |
 
 <!-- ========== 输出规约 ========== -->

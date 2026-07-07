@@ -23,14 +23,16 @@
 
 ### 2. 准备确定性约束参数
 
-审核中有一类问题不应交给模型凭感觉判断：`length` 是否落在目标区间、`words_to_avoid` / `avoid_words` 是否仍出现在正文中。这些来自 EXTEND.md、active 账号配置、custom_style 或风格预设的硬性约束，先用脚本检查，再判断人味、结构和内容质量。
+审核中有一类问题不应交给模型凭感觉判断：`length` 是否落在目标区间、`words_to_avoid` / `avoid_words` 是否仍出现在正文中。这些来自 active profile、custom_style 或风格预设的硬性约束，先用脚本检查，再判断人味、结构和内容质量。
+
+主代理先调用 `scripts/resolve_preferences.py`，使用返回的 `constraint_check_args` 作为审核脚本参数。不要为了组装审核参数而直接读取完整 EXTEND.md。
 
 ### 3. 委派审核子代理
 
 按下方「审核子代理模板」派发独立子代理，参数设置：
 - `[ARTICLE_CONTENT]` → 用户提供的待审核文章全文
 - `[PLATFORM]` → 当前目标平台
-- `[CONSTRAINT_CHECK_ARGS]` → 除文章内容以外的脚本参数，例如 `--extend /path/to/EXTEND.md --profile wechat-tech --length "800-1200"`
+- `[CONSTRAINT_CHECK_ARGS]` → resolver 返回的脚本参数，例如 `--extend /path/to/EXTEND.md --profile wechat-tech`
 
 **独立性要求**：不传递当前会话历史——子代理以纯粹读者视角介入。
 
@@ -56,7 +58,7 @@
 | `[ARTICLE_CONTENT]` | 待审核文章全文 | 创建/改写产出，或用户提供的草稿 |
 | `[PLATFORM]` | 目标平台 | `wechat` / `xiaohongshu` / `unknown` |
 | `[AI_TELL_CATALOG]` | AI 痕迹完整文档内容 | 读取 `references/ai-tell-catalog-zh.md` 文件中的全部内容并进行注入，请务必保持内容完整，切勿进行任何精简或删减 |
-| `[CONSTRAINT_CHECK_ARGS]` | 确定性约束检查参数 | 主代理根据 EXTEND.md、active 账号配置、显式长度和显式风格生成；不包含文章内容本身 |
+| `[CONSTRAINT_CHECK_ARGS]` | 确定性约束检查参数 | 主代理使用 resolver 返回的 `constraint_check_args`，再追加本次显式长度或显式风格参数；不包含文章内容本身 |
 
 ### 模板内容
 

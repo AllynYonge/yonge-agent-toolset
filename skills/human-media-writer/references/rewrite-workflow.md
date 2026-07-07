@@ -6,12 +6,15 @@
 
 ## 1. 加载偏好设置
 
-在向用户提问之前，按优先级 **使用 `read` 直接读取已知路径，不要用文件搜索工具 —— `.human-media-writer/` 是隐藏目录，避免搜索不到。** 一旦成功读取到高优先级的文件，请立即停止后续的读取操作。
+在向用户提问之前，调用 resolver 获取最小 active profile 配置：
 
-1. `{workspace_dir}/.human-media-writer/EXTEND.md`（项目级）
-2. `$HOME/.human-media-writer/EXTEND.md`（用户主目录级）
+```bash
+python3 skills/human-media-writer/scripts/resolve_preferences.py \
+  --workspace-dir "{workspace_dir}" \
+  [--profile "<name>"]
+```
 
-读取失败（文件不存在）则静默回退到默认值。
+resolver 内部优先读取项目级 `{workspace_dir}/.human-media-writer/EXTEND.md`，再读取用户级 `$HOME/.human-media-writer/EXTEND.md`。只使用脚本返回的 active profile、风格、长度和审核参数；不要直接读取完整 EXTEND.md。
 
 ### 2. 选题诊断
 
@@ -87,11 +90,11 @@
 按优先级确定写作风格：
 
 1. 用户本次请求中的显式风格指令（最高优先）
-2. EXTEND.md 中的 `custom_style`（内联自定义风格）
-3. EXTEND.md 中的 `writing_style`（内置风格预设名）
+2. resolver 返回的 active profile `custom_style`（内联自定义风格）
+3. resolver 返回的 active profile `writing_style`（内置风格预设名）
 4. `default` 风格预设（兜底）
 
-加载对应的 `references/styles/{preset}.yaml` 获取具体声音参数。若用户提供了写作样本要求模仿，或需要从样本提取风格结构，按 SKILL.md §写作风格系统 的自定义风格结构与样本提取流程执行。
+使用 resolver 返回的 `style` 获取具体声音参数。若用户提供了写作样本要求模仿，或需要从样本提取风格结构，按 SKILL.md §写作风格系统 的自定义风格结构与样本提取流程执行。
 
 ### 5. 平台
 
@@ -101,7 +104,7 @@
 |------|------|
 | 公众号/微信/长文/深度 | 微信 |
 | 小红书/xhs/笔记/种草 | 小红书 |
-| 无信号 | EXTEND.md 的 `default_platform`，再无则默认微信 |
+| 无信号 | resolver 返回的 active profile `platform`，再无则默认微信 |
 
 确定后按 SKILL.md §平台形态 应用对应约束（段落长度上限、开篇模式、内容密度要求、读者注意力模型）。
 

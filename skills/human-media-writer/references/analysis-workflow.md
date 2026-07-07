@@ -32,14 +32,17 @@ flowchart TD
 
 ## 1. 加载偏好设置
 
-**读取规则**：使用 `read` 直接读取以下路径（隐藏目录，不使用文件搜索工具）。按编号顺序尝试，成功读取即停止：
+调用 resolver 获取最小 active profile 配置：
 
-1. `{workspace_dir}/.human-media-writer/EXTEND.md`（项目级）
-2. `$HOME/.human-media-writer/EXTEND.md`（用户主目录级）
+```bash
+python3 skills/human-media-writer/scripts/resolve_preferences.py \
+  --workspace-dir "{workspace_dir}" \
+  [--profile "<name>"]
+```
 
-读取失败则静默回退到默认值。
+resolver 内部优先读取项目级 `{workspace_dir}/.human-media-writer/EXTEND.md`，再读取用户级 `$HOME/.human-media-writer/EXTEND.md`。只使用脚本返回的 active profile；不要直接读取完整 EXTEND.md。
 
-EXTEND.md 中的 `positioning`、`audience`、`purpose` 用于校准步骤 7 创作衍生方向的匹配度——确保推荐的选题与创作者的账号定位一致。
+active profile 中的 `positioning`、`audience`、`purpose` 用于校准步骤 7 创作衍生方向的匹配度——确保推荐的选题与创作者的账号定位一致。
 
 ## 2. 接收文章
 
@@ -84,12 +87,12 @@ EXTEND.md 中的 `positioning`、`audience`、`purpose` 用于校准步骤 7 创
 ## 深度分析
 #### 关键要点
 1. **{一句话观点}**
-   > "{支撑该观点的原文引用}"
-   - 证据功能：{支撑论点 / 核心数据 / 权威引述 / 反例}
+   > 原文引用："{支撑该观点的原文引用}"
+   > 证据功能：{支撑论点 / 核心数据 / 权威引述 / 反例}
 
 2. **{一句话观点}**
-   > "{原文引用}"
-   - 证据功能：{...}
+   > 原文引用："{原文引用}"
+   > 证据功能：{...}
 
 3. ...
 ```
@@ -291,7 +294,7 @@ Never 输出无法落地的空洞感悟（如"要保持开放心态"）——每
 
 ## 8. 下游衔接
 
-分析完成后，用户可选定优先级表中的方向进入下一步。以下三条路径均可支持：
+分析完成后，引导用户选择一个方向进入下一步。以下三条路径均可支持：
 
 ### 8.1 分析 → 选题细化 → 创建
 
