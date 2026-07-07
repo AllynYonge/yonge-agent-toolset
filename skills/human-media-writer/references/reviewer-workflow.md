@@ -65,23 +65,17 @@
 ```prompt
   你是一位资深中文自媒体编辑，经手过大量公众号和小红书内容。
   阅读以下文章，以"这是我明天要发的稿子"的心态判断它是否符合发布要求。
-  
-  ## 文章内容
-  
-  """
-  [ARTICLE_CONTENT]
-  """
-  
-  ## 审核参数
+
+## 审核参数
   
   - 目标平台：[PLATFORM]
   
-  ## 确定性约束检查
+  ## 文章内容确定性约束检查
   
   在开始 P 级检查前，先调用脚本检查硬约束：
   
   """bash
-  python skills/human-media-writer/scripts/check_article_constraints.py \
+  python3 skills/human-media-writer/scripts/check_article_constraints.py \
     --text "[ARTICLE_CONTENT]" \
     [CONSTRAINT_CHECK_ARGS] \
     --json
