@@ -16,19 +16,18 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 
 resolver 内部优先读取项目级 `{workspace_dir}/.human-media-writer/EXTEND.md`，再读取用户级 `$HOME/.human-media-writer/EXTEND.md`。只使用脚本返回的 active profile、风格、长度和审核参数；不要直接读取完整 EXTEND.md。
 
-### 2. 选题诊断
+### 2. 选题
 
-**从分析模式衔接时的快捷路径**：如果用户已在本次会话中完成了分析模式（即 `references/analysis-workflow.md` 已产出选题优先级表），且用户选定了某个方向说"按这个方向改写"，则直接使用该方向作为选题诊断结果——跳过下方的完整选题流程，将选定方向的信息按注入映射规则传递给后续步骤。
+委派选题子代理 `references/topic-selection-prompt.md` 进行选题
 
-**常规路径**（无前置分析时）：
+传入参数：
 
-必须加载 `references/topic-selection.md` 执行选题流程：
+- `[MATERIAL]`：待改写原文全文、用户修改要求、必要背景
+- `[CANDIDATE_TOPIC]`：原文核心角度、用户指定的新方向，或分析模式传入的选题方向；如果都没有则留空
+- `[PROFILE_CONTEXT]`：active profile 中的 `positioning`、`audience`、`purpose`；没有则填"（空）"
+- `[MODE]`：`rewrite`
 
-1. 基于原文内容和用户反馈，输出输入诊断声明
-2. 产出3个替代选题方案（保留原文素材，更换切入角度）
-3. 等待用户选定
-
-用户选定后，将方案中的关键信息注入后续步骤：
+主代理直接呈现子代理返回的三个主题方案，等待用户选定；随后，将用户所选方案中的关键信息提取并注入后续步骤：
 - "目标用户与场景" → 补充信息收集中的目标读者
 - "内容结构" → 指导第9步正文构建
 - "核心论点" → 作为第7步核心论点的起点
