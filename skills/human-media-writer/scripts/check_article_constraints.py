@@ -198,7 +198,11 @@ def unique_words(groups: Iterable[Iterable[Any]]) -> List[str]:
     seen = set()
     words: List[str] = []
     for group in groups:
-        for item in group or []:
+        if isinstance(group, str):
+            items = [w.strip() for w in group.split("|")]
+        else:
+            items = group or []
+        for item in items:
             word = str(item).strip()
             if word and word not in seen:
                 seen.add(word)

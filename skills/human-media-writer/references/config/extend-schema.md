@@ -196,12 +196,8 @@ custom_style:
   favorite_moves:                  # 3-5 个标志性手法
     - "矛盾式开头"
     - "冷幽默收尾"
-  words_to_keep:                   # 作者常用的口头禅/标志词
-    - "其实"
-    - "说白了"
-  words_to_avoid:                  # 此风格下应规避的词
-    - "赋能"
-    - "助力"
+  words_to_keep: "其实|说白了"       # 作者常用的口头禅/标志词，用"|"分隔多个
+  words_to_avoid: "赋能|助力"         # 此风格下应规避的词，用"|"分隔多个
 
   # 情感与自我
   emotional_range: "从觉得好笑到轻度无奈"
