@@ -10,6 +10,7 @@ EXTEND.md 使用 YAML 前言（frontmatter）来定义结构化字段。每个�
 ---
 default_profile: wechat-tech
 long_threshold: 3000
+output_dir: articles
 avoid_words:
   - 赋能
   - 助力
@@ -54,7 +55,7 @@ wechat-personal:
 
 **继承规则**：账号内的字段覆盖全局同名字段；账号中未定义的字段回退到全局值，全局未定义则使用内置默认值。
 
-**账号 key 识别**：YAML 顶层 key 中，值为对象（dict）且不属于保留字的，视为账号定义。保留字：`default_profile`、`long_threshold`、`avoid_words`。
+**账号 key 识别**：YAML 顶层 key 中，值为对象（dict）且不属于保留字的，视为账号定义。保留字：`default_profile`、`long_threshold`、`output_dir`、`avoid_words`。
 
 ## 字段定义
 
@@ -66,6 +67,7 @@ wechat-personal:
 |-------|------|---------|------|
 | `default_profile` | 字符串 | （无） | 默认激活的账号名 |
 | `long_threshold` | 数字 | 3000 | 长内容流的字符数阈值 |
+| `output_dir` | 字符串 | （无） | 创建/改写完成后保存 Markdown 文章的目录 |
 | `avoid_words` | 列表 | （无） | 全局规避词（与风格文件中的 words_to_avoid 合并取并集） |
 
 ### 账号属性
@@ -82,6 +84,7 @@ wechat-personal:
 | `custom_style` | 对象 | （无） | 内联自定义写作风格（结构同 styles/*.yaml），优先级高于 `writing_style` |
 | `length` | 数字/字符串 | `auto` | 输出文章目标字数。数字、范围字符串（`"800-1200"`）或预设（`short`/`medium`/`long`/`auto`） |
 | `long_threshold` | 数字 | 3000 | 长内容流的字符数阈值 |
+| `output_dir` | 字符串 | （无） | 创建/改写完成后保存 Markdown 文章的目录；账号内配置可覆盖全局配置 |
 | `avoid_words` | 列表 | （无） | 该账号的规避词列表（替换而非合并全局列表） |
 
 ## 字段详情
@@ -174,6 +177,29 @@ length: auto       # 根据素材量和平台自动判断（默认）
 - 素材量与目标长度严重不匹配时，提醒用户而非强行填充
 - 改写模式下目标长度明显短于原文时，先确认用户意图是精简还是截取
 - 创建/改写完成后的审核阶段由审核子代理调用 `scripts/check_article_constraints.py` 确定性检查实际字数是否落入目标范围，避免只靠模型估算
+
+### output_dir
+
+设置创建和改写模式的文章保存目录。未设置时只在对话中输出文章，不写文件。
+
+```yaml
+# 相对路径：保存到当前项目工作目录下的 articles/
+output_dir: articles
+
+# 绝对路径：保存到指定目录
+output_dir: /Users/me/articles
+```
+
+**路径规则**：
+- 以 `/` 开头的路径按绝对路径处理
+- 不以 `/` 开头的路径按当前项目工作目录的相对路径处理
+- 账号内的 `output_dir` 覆盖全局 `output_dir`
+
+**行为规则**：
+- 仅作用于创建和改写模式，审核和分析模式不自动保存文章
+- resolver 返回的 `output_dir` 是解析后的实际保存目录
+- 技能保存最终版本为 Markdown 文件，并避免覆盖同名文件
+- 保存失败时仍输出文章，并说明失败原因
 
 ### custom_style
 

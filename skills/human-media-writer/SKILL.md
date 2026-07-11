@@ -176,7 +176,7 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 | 找到 | 只应用脚本返回的 active profile。会话首次使用时简短提醒："Using preferences from [path]." |
 | 未找到 | 使用默认值继续。首个任务完成后提供："要我把这些偏好保存下来，下次自动用？" |
 
-代理只使用 resolver 返回的 JSON：`config_path`、`config_scope`、`available_profiles`、`profiles`、每个 profile 的 `effective_config`、`style`、`style_source`、`avoid_words`、`constraint_check_args`。Never 为了日常写作、改写、分析或审核而直接读取完整 EXTEND.md；只有在创建、编辑或解释 EXTEND.md 本身时才读取配置全文和 schema。
+代理只使用 resolver 返回的 JSON：`config_path`、`config_scope`、`available_profiles`、`profiles`、每个 profile 的 `effective_config`、`style`、`style_source`、`output_dir`、`avoid_words`、`constraint_check_args`。Never 为了日常写作、改写、分析或审核而直接读取完整 EXTEND.md；只有在创建、编辑或解释 EXTEND.md 本身时才读取配置全文和 schema。
 
 ### 默认值
 
@@ -191,6 +191,7 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 | 目标长度 | auto | `length` |
 | 改写深度 | low | `deep` |
 | 长文阈值 | 3000 | `long_threshold` |
+| 文章保存目录 | 无 | `output_dir` |
 | 默认账号 | 无 | `default_profile` |
 
 各字段的类型、取值与 YAML 写法见 [references/config/extend-schema.md](references/config/extend-schema.md)（`avoid_words` 等仅在书写/解析 EXTEND.md 时需要的字段也在其中）。首次使用设置：[references/config/first-use-setup.md](references/config/first-use-setup.md)。

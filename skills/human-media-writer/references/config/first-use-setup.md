@@ -21,7 +21,8 @@
    > 2. 运营几个账号？如果多个，给每个起个名字和对应平台（如 wechat-tech、xhs-lifestyle）
    > 3. 每个账号的定位、目标受众、做账号的目的是什么？（可选，后续也能补充）
    > 4. 选一个内置风格作为起点？（lucid-tech / life-observer / sharp-commentary / warm-narrative），或者给我一篇你觉得最像你风格的文章，我提取后内联到配置里
-   > 5. 保存到哪里？（项目目录 `.human-media-writer/EXTEND.md` 还是用户目录 `~/.human-media-writer/EXTEND.md`）"
+   > 5. 生成/改写后的文章要自动保存到哪个目录？（可选；以 `/` 开头为绝对路径，如 `/Users/me/articles`；否则为当前项目工作目录下的相对路径，如 `articles`）
+   > 6. 保存配置到哪里？（项目目录 `.human-media-writer/EXTEND.md` 还是用户目录 `~/.human-media-writer/EXTEND.md`）"
 
 4. 根据回答生成 EXTEND.md。以下为三种典型形态的最小骨架，仅示意"存成什么样"；完整字段定义、类型与继承规则以 [extend-schema.md](references/config/extend-schema.md) 为权威源，需要照抄结构时读它，此处不复制。
 
@@ -36,6 +37,7 @@ wechat-tech:
   purpose: "建立个人品牌"
   writing_style: lucid-tech
   long_threshold: 3000
+  output_dir: articles
 ---
 ```
 
@@ -51,6 +53,7 @@ wechat-tech:
   audience: "25-40岁互联网从业者"
   purpose: "建立个人品牌"
   long_threshold: 3000
+  output_dir: articles
   custom_style:
     name: 我的风格
     # ... 其余字段结构见 extend-schema §custom_style
@@ -63,6 +66,7 @@ wechat-tech:
 ---
 default_profile: wechat-tech
 long_threshold: 3000
+output_dir: articles
 
 wechat-tech:
   platform: wechat

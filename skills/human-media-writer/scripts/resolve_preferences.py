@@ -29,6 +29,7 @@ DEFAULTS = {
     "length": "auto",
     "deep": "low",
     "long_threshold": 3000,
+    "output_dir": None,
 }
 
 RESERVED_GLOBAL_KEYS = {
@@ -42,6 +43,7 @@ RESERVED_GLOBAL_KEYS = {
     "length",
     "deep",
     "long_threshold",
+    "output_dir",
     "avoid_words",
 }
 
@@ -149,14 +151,31 @@ def shell_args(parts: List[str]) -> str:
     return " ".join(shlex.quote(part) for part in parts)
 
 
+def resolve_output_dir(workspace_dir: str, value: Any) -> Optional[str]:
+    if value in (None, "", "auto"):
+        return None
+    if not isinstance(value, str):
+        raise ConfigError("output_dir must be a string path")
+
+    path = value.strip()
+    if not path:
+        return None
+    if path.startswith("/"):
+        return os.path.abspath(path)
+    return os.path.abspath(os.path.join(workspace_dir, path))
+
+
 def build_profile_result(
     skill_root: str,
     extend_path: Optional[str],
     profile_name: Optional[str],
     config: Dict[str, Any],
+    workspace_dir: str,
 ) -> Dict[str, Any]:
     effective = resolve_effective_config(config, profile_name)
     style_config, style_source = load_style(skill_root, effective)
+    output_dir = effective.get("output_dir", DEFAULTS["output_dir"])
+    output_dir = resolve_output_dir(workspace_dir, output_dir)
 
     avoid_words = unique_words(
         [
@@ -179,6 +198,7 @@ def build_profile_result(
         "length": effective.get("length", DEFAULTS["length"]),
         "deep": effective.get("deep", DEFAULTS["deep"]),
         "long_threshold": effective.get("long_threshold", DEFAULTS["long_threshold"]),
+        "output_dir": output_dir,
         "avoid_words": avoid_words,
         "constraint_check_args": shell_args(constraint_args),
     }
@@ -200,7 +220,7 @@ def resolve_preferences(
     profiles: Dict[str, Dict[str, Any]] = {}
 
     for profile_name in profile_names:
-        result = build_profile_result(skill_root, extend_path, profile_name, config)
+        result = build_profile_result(skill_root, extend_path, profile_name, config, workspace_dir)
         output_key = result.get("active_profile") or "__default__"
         profiles[str(output_key)] = result
 
