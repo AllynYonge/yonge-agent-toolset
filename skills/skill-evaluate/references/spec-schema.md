@@ -17,14 +17,14 @@ Use this file when writing or reviewing a behavior test spec.
 |---|---|---|
 | `backend` | `hermes` | `hermes`, `codex`, or `claude_code` |
 | `timeout` | `240` | Per-turn timeout in seconds |
-| `agent_max_turns` | `20` | Max agent turns per run |
+| `agent_max_turns` | `20` | Agent 单次运行的最大推理步数（tool call 循环上限） |
 | `toolsets` | — | Toolsets passed to `hermes chat --toolsets` (Hermes only) |
 | `preload_skill` | `true` | Load the target skill before the first turn (Hermes only) |
 | `related_skills` | `[]` | Extra skills to copy into the temp home |
 | `model` | — | Model name; passed as `--model` (Hermes) or `-m` (Codex) |
 | `provider` | — | Provider name; passed as `--provider` (Hermes only) |
 | `judge_backend` | tested backend | Backend used for `semantic`/`not_semantic` assertions; set only when judging with a different backend |
-| `conversation_mode` | `native_session` | `native_session` for real multi-turn resume; `isolated` for independent one-prompt processes |
+| `conversation_mode` | `native_session` | 会话策略：`native_session` = 真实多轮对话续接；`isolated` = 每轮独立进程 |
 | `command_template` | backend default | Command template for Codex/Claude Code backends |
 | `inherit_runtime_config` | `true` | Inherit config/credentials from the real backend home |
 
@@ -111,8 +111,8 @@ to failing cases.
 | `enabled` | `false` | Master switch for quality evaluation |
 | `dimensions` | `[]` | List of quality dimension names to grade |
 | `rubrics` | `{}` | Map of dimension name → grading criterion text |
-| `claim_extraction` | `false` | Extract and verify factual claims in output |
-| `eval_critique` | `false` | Have the judge critique the test assertions themselves |
+| `claim_extraction` | `false` | 提取输出中的事实性声明并逐一核查 |
+| `eval_critique` | `false` | 让 judge 自检当前 spec 断言本身的质量和覆盖度 |
 | `judge_model` | — | Override model for quality judge calls |
 | `baseline` | `null` | Baseline comparison config (see below) |
 | `thresholds` | `null` | Quality threshold config (see below) |

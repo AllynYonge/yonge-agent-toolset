@@ -21,22 +21,16 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 
 ### 2. 确定选题（不可跳过）
 
-委派选题子代理 `references/topic-selection-prompt.md` 进行选题。
+将审核任务委派给 `references/subagents/agents/topic-selection.md` 子代理完成。
 
-即使用户已经从分析模式选定了某个方向，本步骤仍然不可跳过——分析产出的"选题方向"只有灵感来源和切入策略，还不是可执行选题（缺少精确的读者画像、核心论点句、内容结构预判和标题方案）。选题子代理会评审并锐化这个方向，产出 3 个可执行方案供用户做最终选择。跳过这一步等于在模糊角度上直接改写，结果往往偏离用户真实意图。
+即使用户已从分析模式选定方向，本步骤仍不可跳过——分析方向只有灵感与切入策略，还不是可执行选题。选题任务会评审并锐化为 3 个方案供用户最终选择。
 
-传入参数：
+MUST 将选题结果原样呈现给用户，等待选定后注入后续步骤：
 
-- `[MATERIAL]`：待改写原文全文、用户修改要求、必要背景
-- `[CANDIDATE_TOPIC]`：原文核心角度、用户指定的新方向，或分析模式传入的选题方向；**如果来自分析模式，填入用户选定方向的标题 + 核心论点 + 切入策略**；如果都没有则留空
-- `[PROFILE_CONTEXT]`：active profile 中的 `positioning`、`audience`、`purpose`；没有则填"（空）"
-- `[MODE]`：`rewrite`
-
-MUST 将子代理返回的选题详细结果原样呈现给用户，不得精简或删减任何内容，展示后等待用户选定。等待用户选定；随后，将用户所选方案中的关键信息提取并注入后续步骤：
-- "目标用户与场景" → 补充信息收集中的目标读者
-- "内容结构" → 指导第9步正文构建
-- "核心论点" → 作为第7步核心论点的起点
-- "关键词与标签" → 指导标题和SEO优化
+- 目标用户与场景 → 补充信息收集中的目标读者
+- 内容结构 → 指导正文构建
+- 核心论点 → 作为核心论点起点
+- 关键词与标签 → 指导标题和 SEO
 
 ### 3. 提取语义锚点 / 结构蓝图
 
@@ -188,4 +182,5 @@ python3 skills/human-media-writer/scripts/check_article_constraints.py \
 
 ### 9. 委派审核子代理
 
-改写完成后，按 `references/reviewer-workflow.md` 的「审核子代理模板」派发独立子代理进行质量审核，然后按其「迭代修订协议」执行修复→再审循环，直到满足终止条件。
+执行 `references/subagents/agents/article-review.md`，调度遵循 `references/subagents/protocol.md`。  
+修复→再审循环按 `references/subagents/agents/article-review.md`「交互模式 · 主代理闭环」，直到满足终止条件。

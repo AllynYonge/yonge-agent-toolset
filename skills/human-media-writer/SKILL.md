@@ -259,7 +259,7 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 
 - **配置读取**：EXTEND.md 所在的 `.human-media-writer/` 是隐藏目录，且可能包含多个账号的大量风格资料。日常运行 MUST 调用 `scripts/resolve_preferences.py` 获取 active profile，Never 直接 `read` 完整 EXTEND.md，避免无关账号污染上下文。只有在创建、编辑或解释 EXTEND.md 本身时才读取完整配置文件。
 - **工作目录**：`{workspace_dir}` 是运行时占位符，由代理运行时环境自动替换为当前工作目录的实际路径。无需手动处理。
-- **子代理调度**：选题与审核可通过 Agent tool 派发独立子代理实例。选题子代理只产出选题评审和 3 个推荐方案，不写正文；审核子代理只评估质量，不参与创作。创作正文 MUST 使用单代理完成（语气一致性需要一个思维贯穿全文）。Never 向审核子代理传递创作会话历史。
+- **子代理调度**：选题与审核需要派发子代理时，MUST 先读取对应子代理任务说明（`references/subagents/agents/*`），再读 `references/subagents/protocol.md` 与当前环境的 `references/subagents/adapters/` 规则（无匹配用 `generic.md`）。选题子代理只产出选题评审和 3 个推荐方案，不写正文；审核子代理只评估质量，不参与创作。创作正文 MUST 使用单代理完成（语气一致性需要一个思维贯穿全文）。Never 向审核子代理传递创作会话历史。
 - **用户提问工具**：需要向用户提问时，使用代理运行时内置的用户输入工具（AskUserQuestion、ask_user、clarify 或等效工具）。如果不存在此类工具，输出纯文本编号列表。尽量合并问题，一次最多问 3 个。
 
 ### 流程视图
@@ -333,7 +333,7 @@ flowchart TD
 
 | 模式 | 步骤 | 详细参考 |
 |------|-------|-----------------|
-| 选题 | 委派选题子代理 → 输入诊断 → 可选待定选题评审 → 输出3个方案 | [references/topic-selection-prompt.md](references/topic-selection-prompt.md) |
+| 选题 | 委派选题子代理 → 输入诊断 → 可选待定选题评审 → 输出3个方案 | [references/subagents/agents/topic-selection.md](references/subagents/agents/topic-selection.md) |
 | 创建 | 收集信息 → 委派选题子代理 → 语义锚点 → 写作风格 → 平台形态 → 起草 → 委派审核子代理 → 迭代修订 | [references/craft-workflow.md](references/craft-workflow.md) |
 | 改写 | 委派选题子代理评审/优化原选题 → 语义锚点 → 写作风格 → 平台形态 → 改写 → 委派审核子代理 → 迭代修订 | [references/rewrite-workflow.md](references/rewrite-workflow.md) |
 | 分析 | 全局扫描 → 深度分析 → 结构化笔记与可视化 → 创作衍生 → 选题优先级 → 衔接后续模式 | [references/analysis-workflow.md](references/analysis-workflow.md) |
@@ -359,12 +359,14 @@ flowchart TD
 
 | 触发条件 | 文档 |
 |----------|------|
+| 任何需要派发子代理的流程 | 任务说明 `references/subagents/agents/*.md` + `references/subagents/protocol.md` + 对应 `adapters/*.md` |
 | 分析模式 | `references/analysis-workflow.md` |
-| 选题模式，或创建/改写中需要前置选题环节 | `references/topic-selection-prompt.md`（作为选题子代理 prompt 模板读取并注入入参） |
+| 选题模式，或创建/改写中需要前置选题环节 | `references/subagents/agents/topic-selection.md` |
 | 去除 AI 味、审核草稿或改写/编写中文文章 | `references/ai-tell-catalog-zh.md` |
 | 从话题、笔记、转录稿或素材完整创建文章 | `references/craft-workflow.md` |
 | 改写模式 | `references/rewrite-workflow.md` |
-| 审核模式，或创建/改写中委派审核子代理 | `references/reviewer-workflow.md` |
+| 审核模式（入口与场景路由） | `references/reviewer-workflow.md` |
+| 审核任务、交互模式与质量把关闭环 | `references/subagents/agents/article-review.md` |
 | 创建、编辑或解释 EXTEND.md | `references/config/extend-schema.md` |
 | 首次使用后保存偏好 | `references/config/first-use-setup.md` |
 

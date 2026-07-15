@@ -3,3 +3,4 @@
 - [error] [lark-cli docs update content file path](memory/error_lark_cli_update_content_file_path.md) — `docs +update --content @file` 只能使用当前工作目录内的相对路径，不能传绝对路径
 - [error] [Feishu/Lark 文档 generic 抓取截断](memory/error_feishu_doc_generic_truncation.md) — 飞书/Lark Wiki/Docx 的 generic 抓取可能只得目录和开头，应优先用 lark-cli `docs +fetch` 或 `lark-doc` 适配器
 - [error] [Codex CLI image backend timeout](memory/error_imagegen_codex_cli_timeout.md) — 小红书卡片生成中 codex-cli 可能不调用 image_gen 或超时，优先切到 baoyu-image-gen RunningHub/API 后端。
+- [error] [Codex MCP 工具注入快照失效](memory/error_codex_mcp_tool_injection_snapshot.md) — MCP 已连接但模型看不到工具时，应重建任务上下文并以直接工具调用验证，而非追查 resources API

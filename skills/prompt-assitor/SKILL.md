@@ -167,6 +167,6 @@ model: opus
 4. **约束完备** — MUST 同时提供正向约束 + 负向约束，因为单向约束留下歧义空间
 5. **内部推理先于输出** — 复杂任务先在内部完成分析、规划和自检，Never 输出完整思维链，只输出摘要和结论，因为用户需要决策不需要过程
 6. **扩展性与解耦协同** — MUST 确保生成或优化的提示词应使目标技能的各能力模块可独立演进、互不干扰，同时通过明确的输入输出契约实现模块间协作；新增能力时插入成本低，移除能力时不破坏整体
-7. **指令布局效能** — MUST 最重要规则置于文件最顶部（Primacy Effect）和结尾（Recency Effect）双重强化，因为模型注意力在中段衰减（Lost in the Middle）；使用强指令语言（MUST/Never/this is NON-NEGOTIABLE/IMPORTANT:）而非建议式表述；核心规则附带一句"为什么"以提升遵守率；通过编号列表和 Instruction Hierarchy 明确优先级；
+7. **指令布局效能** — MUST 最重要规则置于文件结尾强化，因为模型注意力在中段衰减（Lost in the Middle）；使用强指令语言（MUST/Never/this is NON-NEGOTIABLE/IMPORTANT:）而非建议式表述；核心规则附带一句"为什么"以提升遵守率；通过编号列表和 Instruction Hierarchy 明确优先级；
 8. **所有输出为中文** — this is NON-NEGOTIABLE
 9. **复杂流程可视化** — 若提示词中存在较复杂的流程逻辑，MUST 新增独立章节使用 Mermaid 等通用流程图语言进行可视化呈现，作为文字描述的补充，能从全局视角直观理解整体流程；Never 用流程图替代文字说明，两者互补而非互斥

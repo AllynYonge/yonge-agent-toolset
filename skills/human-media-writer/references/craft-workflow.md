@@ -29,7 +29,7 @@ flowchart TD
     subgraph 交付阶段
         S8[执行硬约束自检]
         S9[呈现初稿并确认]
-        S10[委派审核子代理]
+        S10[执行审核任务]
     end
 
     S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7A --> S7B
@@ -81,36 +81,18 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 
 ### 步骤3：确定选题方案（不可跳过）
 
-委派子代理 `references/topic-selection-prompt.md` 执行选题。
-
-传入参数：
-
-| 参数 | 填充规则 |
-|------|----------|
-| `[MATERIAL]` | 用户提供的话题、素材、笔记、转录稿、背景信息 |
-| `[CANDIDATE_TOPIC]` | 用户已给出的标题/角度/方向；若来自分析模式，填入所选方向的标题 + 核心论点 + 切入策略；无则留空 |
-| `[PROFILE_CONTEXT]` | active profile 中的 `positioning`、`audience`、`purpose`；无则填"（空）" |
-| `[MODE]` | `article` |
-
-#### 结果收集
-
-1. 派发后保存 agent ID。
-2. 等待时始终使用该 agent ID。
-3. `timed_out` 只表示当前等待周期结束，不表示选题任务失败。
-4. `unsupported call` 时不得重新派发；按「子代理调度协议」对同一 ID 恢复。
-5. 收到结果后关闭子代理线程。
-6. 如果运行时完全不支持子代理，由主代理直接执行同一包装提示词，并继续后续流程。
+将选题任务委派给 `references/subagents/agents/topic-selection.md` 子代理完成。
 
 #### 交互规则
 
-- MUST 将子代理返回的选题详细结果原样呈现给用户，不得精简或删减任何内容，展示后等待用户选定。
+- MUST 将选题结果原样呈现给用户，不得精简，展示后等待选定。
 - Never 在用户选定前输出正文大纲或起草正文。
-- 用户选定后，提取所选方案的关键信息注入后续步骤：
+- 用户选定后注入后续步骤：
 
 | 选题字段 | 注入目标 |
 |----------|----------|
 | 目标用户与场景 | 补充步骤2的目标读者 |
-| 内容结构 | 步骤7.1 段落功能序列的主输入 |
+| 内容结构 | 步骤7.1 叙事路径的主输入 |
 | 核心论点 | 步骤7.1 的论点句；全文推进与回扣的锚点 |
 | 关键词与标签 | 步骤7.3 标题与 SEO 用词 |
 
@@ -240,11 +222,12 @@ python3 skills/human-media-writer/scripts/check_article_constraints.py \
 - 用户提出修改意见 → 执行修改后重新呈现，再次等待确认
 - 用户采纳部分优化建议 → 执行对应建议后重新呈现
 
-### 步骤10：委派审核子代理
+### 步骤10：执行审核任务
 
-按 `references/reviewer-workflow.md` 的「审核子代理委派协议」派发一个全新的独立审核子代理。
+将审核任务委派给 `references/subagents/agents/article-review.md` 子代理完成。
 
-- 不传递创作过程、用户反馈历史或上一轮审核结果；
-- 只传递当前待审核版本、平台、审核规则路径及必要约束；
-- 使用 reviewer-workflow 中定义的等待恢复和线程清理规则；
-- 收到审核结果后关闭该轮审核子代理。
+结果处理与修复→再审循环按 `references/subagents/agents/article-review.md`「交互模式 · 主代理闭环」。
+
+- 每轮全新独立任务，不复用选题或上一轮审核子代理。
+- 只传当前待审核版本、目标平台、完整 AI 痕迹目录。
+- 等待超时或调度错误不得同轮重派；结果用完后按规范关闭子代理。
