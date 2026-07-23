@@ -16,6 +16,7 @@ flowchart TD
         S4[提取语义锚点]
         S5[确定写作风格]
         S6[确定目标平台]
+        S6M[确定媒介]
     end
 
     subgraph 起草阶段
@@ -32,7 +33,7 @@ flowchart TD
         S10[执行审核任务]
     end
 
-    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7A --> S7B
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S6M --> S7A --> S7B
     S7B -->|是| S7C --> S7E
     S7B -->|否| S7D --> S7E
     S7E --> S8
@@ -48,8 +49,8 @@ flowchart TD
 | 条件 | 行为 |
 |------|------|
 | 未配置 `output_dir` | 仅在对话中输出，不保存文件 |
-| 已配置 `output_dir` | 第七步生成草稿后，将草稿文件保存至 resolver 返回的 `output_dir`，文件名为 `{title}-draft.md`（必须带 `-draft` 后缀） |
-| 文章通过审核正式交付时 | 重命名为 `{title}.md`（去掉 `-draft` 后缀） |
+| 已配置 `output_dir` | 第七步生成草稿后，将文件保存至 resolver 返回的 `output_dir`，文件名为 `{title}.md`；文件内容以 `# {platform}-{medium}-draft` 作为顶级标题标记草稿态，文章标题用二级标题 `## {title}` 紧跟其后 |
+| 文章通过审核正式交付时 | 将分区标题中的 `-draft` 后缀去掉（如 `# xhs-note-draft` → `# xhs-note`） |
 
 ---
 
@@ -81,7 +82,7 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 
 ### 步骤3：确定选题方案（不可跳过）
 
-将选题任务委派给 `references/subagents/agents/topic-selection.md` 子代理完成。
+将选题任务委派给 `references/tasks/topic-selection.md` 子代理完成。
 
 #### 交互规则
 
@@ -126,7 +127,7 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 3. resolver 返回的 `writing_style`（系统预设风格名，如 `conversational`、`analytical`）
 4. `default` 风格预设
 
-使用 resolver 返回的 `style` 获取具体声音参数（措辞习惯、节奏偏好、情感范围、开头方式、结尾偏好）。若用户提供写作样本要求模仿，按 SKILL.md §写作风格系统 的自定义风格结构与样本提取流程执行。
+使用 resolver 返回的 `style` 获取具体声音参数（措辞习惯、节奏偏好、情感范围、开头方式、结尾偏好）。若用户提供写作样本要求模仿，按 `references/writing-style.md` §写作风格系统 的自定义风格结构与样本提取流程执行。
 
 ### 步骤6：确定目标平台
 
@@ -138,7 +139,19 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 | 小红书/xhs/笔记/种草 | 小红书 |
 | 无信号 | resolver 返回的 active profile `platform`，再无则默认微信 |
 
-确定后按 SKILL.md §平台形态 应用对应约束（段落长度上限、开篇模式、内容密度要求、读者注意力模型）。
+确定后按 `references/platforms/{platform}-{medium}.md` 应用发布形态约束（分发机制、用户心智、内容规范中的段落密度、交互偏好中的 emoji 策略等）。
+
+### 步骤6.5：确定媒介
+
+在平台确定后、起草开始前确定内容媒介（载体）。媒介决定叙事结构、开篇钩子、篇幅特性。
+
+| 信号 | 媒介 |
+|------|------|
+| 长文/深度/专栏文章 | article（长图文） |
+| 短图文/卡片/笔记/种草 | note（短图文笔记） |
+| 无信号 | resolver 返回的 active profile `medium`，再无则按平台推断（微信→article，小红书→note） |
+
+确定后从 `references/platforms/{platform}-{medium}.md` 加载完整形态约束（叙事结构、开篇钩子、篇幅特性、起草侧重、结构步）。篇幅特性与 `length` 硬约束冲突时，以 `length` 为准。形态特定的起草侧重与可选结构步由该数据文件的 §起草侧重 / §结构步 供料，起草阶段就地读取——新增或调整某个形态的行为只改它的数据文件，不改本流程。
 
 ---
 
@@ -156,6 +169,8 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 2. **叙事路径**：用一句话描述文章的推进方式——从什么状态出发、经过什么转折、到达什么落点。不要列功能角色清单；路径应由内容本身的逻辑关系决定。
 3. **首尾呼应**：确定一个能在结尾再次出现的线索（物件、场景、数字或问题）。结尾再次提到这条线索时，必须在开头的基础上增加新的判断、限制、行动建议或更具体的问题；Never 只是换一种说法重复开头。
 
+**媒介结构步（守卫式，可选）**：读取 `references/platforms/{platform}-{medium}.md` §结构步。该节非空则按其说明补做这一步（如短视频的分镜/口播节奏规划），并入骨架；为空则跳过——这是基础流程里显式预留的扩展槽，新增有特殊结构需求的形态时只在其数据文件填写本节，无需改本流程。
+
 #### 7.2 长文分支
 
 以预估成稿是否超过 `long_threshold`（默认 3000 字符，以 active profile 为准）分支：
@@ -165,14 +180,14 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 | 不超过 | 按 7.1 骨架一次性起草（7.3） |
 | 超过 | 先把叙事路径展开为分节大纲（每节：一句话意图 + 计划用的具体材料），向用户确认结构后再分节起草；Never 长文一口气写完再补结构 |
 
-长文分节时，每完成一节按 `rewrite-workflow.md` §6「跨节一致性检查」执行。
+长文分节时，每完成一节按 `references/workflows/rewrite.md` §6「跨节一致性检查」执行。
 
 #### 7.3 写作
 
-按 7.1 的叙事路径推进。每完成一段，内部确认一件事：
+按 7.1 的叙事路径推进，并把 `references/platforms/{platform}-{medium}.md` §起草侧重 叠加在以下通用规则之上（该形态的侧重优先于通用倾向，但不越过 `length` 等硬约束）。每完成一段，内部确认一件事：
 - 这一段给读者增加了什么他之前不知道的（事实、机制、对比、限制、步骤）。如果答不出，合并或删掉。
 
-**开头**：使用风格 `preferred_opening`（scene / contradiction / data / confession / problem）+ 平台硬约束（微信：前 3 句建立冲突/场景/承诺；小红书：具体痛点或前后对比，1–3 句）。
+**开头**：使用风格 `preferred_opening`（scene / contradiction / data / confession / problem）+ 形态开篇钩子（`references/platforms/{platform}-{medium}.md` §开篇钩子）+ 平台段落密度约束（`references/platforms/{platform}-{medium}.md` §内容规范）。
 **结尾**：使用风格 `ending_style`。
 **质感**（句级，非段落级；在自然位置嵌入，不要当清单逐项塞入）：实操细节、现实质疑、不确定性承认、冷幽默（若风格允许）。
 
@@ -224,9 +239,9 @@ python3 skills/human-media-writer/scripts/check_article_constraints.py \
 
 ### 步骤10：执行审核任务
 
-将审核任务委派给 `references/subagents/agents/article-review.md` 子代理完成。
+将审核任务委派给 `references/tasks/article-review.md` 子代理完成。
 
-结果处理与修复→再审循环按 `references/subagents/agents/article-review.md`「交互模式 · 主代理闭环」。
+结果处理与修复→再审循环按 `references/tasks/article-review.md`「交互模式 · 主代理闭环」。
 
 - 每轮全新独立任务，不复用选题或上一轮审核子代理。
 - 只传当前待审核版本、目标平台、完整 AI 痕迹目录。

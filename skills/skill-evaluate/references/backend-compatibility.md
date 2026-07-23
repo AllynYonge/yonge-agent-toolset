@@ -1,6 +1,6 @@
-# Backend compatibility notes
+# 执行后端兼容性说明
 
-Use this note to keep Hermes, Codex, and Claude Code behavior tests aligned.
+本说明用于保持 Hermes、Codex 和 Claude Code 的行为测试规则一致。
 
 ## Recommended split
 
@@ -21,6 +21,39 @@ Use this note to keep Hermes, Codex, and Claude Code behavior tests aligned.
 If a backend needs different session capture, add that logic to the adapter rather than the shared evaluator.
 
 Native session adapters must record the active session id in `CaseState.session_id` so the report can show it under each turn.
+
+
+## Codex — known constraints
+
+### Isolated CODEX_HOME must inherit model catalog files
+Harness creates a temporary `CODEX_HOME` and, by default, inherits runtime config via `inherit_runtime_config: true`.
+
+Copying only `config.toml` + `auth.json` is **not enough** when config contains a relative catalog path such as:
+
+```toml
+model_catalog_json = "cpa-router-models.json"
+```
+
+In that case both the **tested agent** and the **semantic/quality judge** start with the same temporary home. Missing catalog files produce:
+
+```text
+Error: No such file or directory (os error 2)
+```
+
+and quality dimensions show `judge_status=error` / `infra_failed=true`.
+
+**Current adapter behavior**: `CodexBackend.prepare_home()` also inherits:
+- model catalog files referenced by `model_catalog_json`
+- common catalogs: `cpa-router-models.json`, `cc-switch-model-catalog.json`, `models.json`
+- optional `rules/` directory
+
+**Consequence for operators**:
+- This is a harness/env class failure, not a target-skill defect.
+- If you still see os error 2 after updating skill-evaluate, check whether the catalog file exists under the real `$CODEX_HOME` and whether `prepare_home` copied it into the temp home (`--keep-home` helps inspect).
+- Do not loosen assertions or edit the target `SKILL.md` because judge/agent failed to boot.
+
+### Semantic / quality judge
+`codex` implements judges through a separate `codex exec --json` turn in the same temporary `CODEX_HOME`. Quality expects `{"score","evidence","gaps"}`; semantic expects `{"passed","reason"}`. Both need a bootable Codex home first.
 
 ## Claude Code — known constraints
 

@@ -137,18 +137,31 @@ class HermesBackend(AgentBackend):
             f"候选输出：\n{text[:12000]}\n"
         )
 
-    def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+    def extract_agent_messages(self, text: str) -> list[str]:
+        """Hermes quiet mode already returns user-visible text as stdout."""
+        text = (text or "").strip()
+        return [text] if text else []
+
+    def run_json_judge(
+        self,
+        prompt: str,
+        env: dict[str, str],
+        timeout: int,
+        *,
+        judge_model: str | None = None,
+    ) -> tuple[Any | None, str]:
         cmd = [
             "hermes",
             "chat",
             "-q",
-            self.semantic_prompt(assertion, text),
+            prompt,
             "--quiet",
             "--source",
-            "skill-semantic-judge",
+            "skill-json-judge",
             "--max-turns",
             "2",
         ]
+        assertion = {"judge_model": judge_model} if judge_model else {}
         self.add_model_flags(
             cmd,
             assertion,
@@ -165,21 +178,43 @@ class HermesBackend(AgentBackend):
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=int(assertion.get("timeout", timeout)),
+                timeout=int(timeout),
             )
         except subprocess.TimeoutExpired as e:
             raw = f"{e.stdout or ''}\n{e.stderr or ''}"
-            return False, f"semantic judge timeout after {int(assertion.get('timeout', timeout))}s: {raw[-500:]}"
+            return None, f"judge timeout after {int(timeout)}s: {raw[-500:]}"
         raw = (cp.stdout or "") + "\n" + (cp.stderr or "")
-        match = re.search(r"\{.*\}", raw, re.S)
         if cp.returncode != 0:
-            return False, f"semantic judge exited {cp.returncode}: {raw[-500:]}"
-        if not match:
-            return False, f"semantic judge returned non-JSON: {raw[-500:]}"
+            return None, f"judge exited {cp.returncode}: {raw[-500:]}"
+        # Prefer full JSON value (object or array)
         try:
-            obj = json.loads(match.group(0))
-        except Exception as e:
-            return False, f"semantic judge JSON parse failed: {e}; raw={raw[-500:]}"
+            obj = json.loads((cp.stdout or "").strip())
+            if isinstance(obj, (dict, list)):
+                return obj, "ok"
+        except Exception:
+            pass
+        candidates = list(re.finditer(r"(\{.*\}|\[.*\])", raw, re.S))
+        for match in reversed(candidates):
+            try:
+                obj = json.loads(match.group(0))
+                if isinstance(obj, (dict, list)):
+                    return obj, "ok"
+            except Exception:
+                continue
+        return None, f"json judge returned non-JSON: {raw[-500:]}"
+
+    def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+        judge_model = assertion.get("judge_model")
+        obj, detail = self.run_json_judge(
+            self.semantic_prompt(assertion, text),
+            env,
+            int(assertion.get("timeout", timeout)),
+            judge_model=str(judge_model) if judge_model else None,
+        )
+        if obj is None:
+            return False, f"semantic judge {detail}"
+        if not isinstance(obj, dict) or "passed" not in obj:
+            return False, f"semantic judge missing passed field: {obj}"
         passed = bool(obj.get("passed"))
         reason = str(obj.get("reason", ""))
         return passed, reason or f"semantic judge passed={passed}"

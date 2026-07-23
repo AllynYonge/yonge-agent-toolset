@@ -5,8 +5,8 @@
 | 条件 | 行为 |
 |------|------|
 | 未配置 `output_dir` | 仅在对话中输出，不保存文件 |
-| 已配置 `output_dir` | 第七步生成草稿后，将草稿文件保存至 resolver 返回的 `output_dir`，文件名为 `{title}-draft.md`（必须带 `-draft` 后缀） |
-| 文章通过审核正式交付时 | 重命名为 `{title}.md`（去掉 `-draft` 后缀） |
+| 已配置 `output_dir` | 第七步生成草稿后，将文件保存至 resolver 返回的 `output_dir`，文件名为 `{title}.md`；文件内容以 `# {platform}-{medium}-draft` 作为顶级标题标记草稿态，文章标题用二级标题 `## {title}` 紧跟其后 |
+| 文章通过审核正式交付时 | 将分区标题中的 `-draft` 后缀去掉（如 `# xhs-note-draft` → `# xhs-note`） |
 ## 改写模式
 
 ## 1. 加载偏好设置
@@ -21,7 +21,7 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 
 ### 2. 确定选题（不可跳过）
 
-将审核任务委派给 `references/subagents/agents/topic-selection.md` 子代理完成。
+将选题任务委派给 `references/tasks/topic-selection.md` 子代理完成。
 
 即使用户已从分析模式选定方向，本步骤仍不可跳过——分析方向只有灵感与切入策略，还不是可执行选题。选题任务会评审并锐化为 3 个方案供用户最终选择。
 
@@ -92,7 +92,7 @@ MUST 将选题结果原样呈现给用户，等待选定后注入后续步骤：
 3. resolver 返回的 active profile `writing_style`（内置风格预设名）
 4. `default` 风格预设（兜底）
 
-使用 resolver 返回的 `style` 获取具体声音参数。若用户提供了写作样本要求模仿，或需要从样本提取风格结构，按 SKILL.md §写作风格系统 的自定义风格结构与样本提取流程执行。
+使用 resolver 返回的 `style` 获取具体声音参数。若用户提供了写作样本要求模仿，或需要从样本提取风格结构，按 `references/writing-style.md` §写作风格系统 的自定义风格结构与样本提取流程执行。
 
 ### 5. 平台
 
@@ -104,11 +104,25 @@ MUST 将选题结果原样呈现给用户，等待选定后注入后续步骤：
 | 小红书/xhs/笔记/种草 | 小红书 |
 | 无信号 | resolver 返回的 active profile `platform`，再无则默认微信 |
 
-确定后按 SKILL.md §平台形态 应用对应约束（段落长度上限、开篇模式、内容密度要求、读者注意力模型）。
+确定后按 `references/platforms/{platform}-{medium}.md` 应用发布形态约束（分发机制、用户心智、内容规范中的段落密度、交互偏好中的 emoji 策略等）。
+
+### 5.5 媒介
+
+在平台确定后、改写开始前确定内容媒介（载体）。媒介决定叙事结构、开篇钩子、篇幅特性。
+
+| 信号 | 媒介 |
+|------|------|
+| 长文/深度/专栏文章 | article（长图文） |
+| 短图文/卡片/笔记/种草 | note（短图文笔记） |
+| 无信号 | resolver 返回的 active profile `medium`，再无则按平台推断（微信→article，小红书→note） |
+
+确定后从 `references/platforms/{platform}-{medium}.md` 加载完整形态约束（叙事结构、开篇钩子、篇幅特性、起草侧重、结构步）。篇幅特性与 `length` 硬约束冲突时，以 `length` 为准。形态特定的起草侧重与可选结构步由该数据文件的 §起草侧重 / §结构步 供料，改写阶段就地读取——新增或调整某个形态的行为只改它的数据文件，不改本流程。
 
 ### 6. 改写
 
 本步骤根据 `--deep` 档位执行不同策略：
+
+开始改写前，把 `references/platforms/{platform}-{medium}.md` §起草侧重 叠加到本步策略之上（该形态的侧重优先于通用倾向，但不越过锚点保护与 `length` 等硬约束）；并读取该文件 §结构步——非空则按其说明补做这一步并入改写规划，为空则跳过（基础流程预留的扩展槽，新增特殊结构需求的形态时只填数据文件本节，不改本流程）。
 
 #### --deep low / medium：重写而非修补
 
@@ -182,5 +196,5 @@ python3 skills/human-media-writer/scripts/check_article_constraints.py \
 
 ### 9. 委派审核子代理
 
-执行 `references/subagents/agents/article-review.md`，调度遵循 `references/subagents/protocol.md`。  
-修复→再审循环按 `references/subagents/agents/article-review.md`「交互模式 · 主代理闭环」，直到满足终止条件。
+执行 `references/tasks/article-review.md`，调度遵循 `references/subagents/protocol.md`。  
+修复→再审循环按 `references/tasks/article-review.md`「交互模式 · 主代理闭环」，直到满足终止条件。

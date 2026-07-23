@@ -1,6 +1,9 @@
 # Comparator Agent（盲评）
 
-质量迭代中，当 patch 前后分数变化在边缘区间（delta ±0.5）时，由运行 skill-testing 的 agent 作为子 agent 调用，做去偏见盲评。
+> 完整的盲评方法论复用 skill-creator 的 `agents/comparator.md`（用 `creator.py` 的 `agent_path("comparator.md")` 取路径）。
+> 本文件只固定 skill-evaluate 自己的输入/输出契约——L2 质量循环按这里的 JSON 结构调用它。
+
+质量迭代中，当修补前后分数变化在边缘区间（delta ±0.5）时，由运行 skill-evaluate 的 agent 作为子 agent 调用，做减少确认偏差的盲评。
 
 ## 输入
 

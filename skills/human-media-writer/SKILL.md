@@ -13,142 +13,20 @@ description: 创建、改写、分析或审核中文自媒体文章，使其在�
 
 这些规则优先级最高，贯穿选题、创建、改写、分析和审核全流程：
 
-1. **MUST 先保意思，再改文风。** 语义锚点（§语义锚点）中列出的所有信息类型不可改变含义——因为事实错误无法用好文笔弥补。改写模式下此规则受 `--deep` 档位调节：`low` 全部保护，`medium` 仅保护核心事实，`high` 转为结构蓝图约束（详见 rewrite-workflow 步骤 3）。
+1. **MUST 先保意思，再改文风。** 语义锚点（各工作流中提取的名称、数字、因果、极性等信息类型）不可改变含义——因为事实错误无法用好文笔弥补。改写模式下此规则受 `--deep` 档位调节：`low` 全部保护，`medium` 仅保护核心事实，`high` 转为结构蓝图约束（详见 `references/workflows/rewrite.md` 步骤 3）。
 2. **MUST 理解段落意图后重新组织表达。** Never 仅做同义词替换或短语级修饰——因为表层替换保留了 AI 的句法骨架，读者仍能感知机器感。
-3. **MUST 风格和平台分开处理。** 写作风格决定"谁在说话"，平台形态决定"在哪里说话"，两者正交组合——因为混淆二者会导致风格被容器约束吞没。
+3. **MUST 风格与发布形态分开处理。** 写作风格决定"谁在说话"，发布形态（平台×媒介）决定"在哪里、用什么载体说话"——因为混淆它们会导致风格被容器约束吞没。
+4. **MUST 结合语境和模式簇判断 AI 痕迹。** 单独出现一个词、标点、短句、设问、emoji 或规整语法，不足以构成修改理由；若表达与作者样本、目标平台或文体一致，优先保留——因为把正常表达机械清除，只会抹平真实声音。
 
-## 写作指导
+## 核心知识
 
-### 整体风格原则
+涉及对应环节前 MUST 加载完整文件。
 
-写得像一个已经想清楚自己观点的人，并有如下偏好：
+- **写作风格**（"谁在说话"的声音身份，跨平台跨媒介不变）：整体风格原则、人的细节、具体性底线、风格来源优先级、内置预设（`lucid-tech` / `life-observer` / `sharp-commentary` / `warm-narrative`）、自定义风格结构、样本提取红线、风格与平台/媒介冲突解决。完整规则见 [references/writing-style.md](references/writing-style.md)。
+- **平台 × 媒介**（"在哪里说话 × 用什么载体说话"的完整发布形态约束）：平台容器（分发机制、用户心智、内容规范、交互偏好）+ 媒介载体（叙事结构、开篇钩子、篇幅特性、起草侧重），每个发布形态一个数据文件。见 [references/platforms/](references/platforms/)。
+- **内容形态转换输出**：同一内容的多个「平台 × 媒介」形态聚合到一个文件（`# {platform}-{medium}` 分区）与就地追加规则。见 [references/multi-format-output.md](references/multi-format-output.md)。
 
-- 具体事实而非抽象论断
-- 场景、实例和细小观察而非宏大叙事框架
-- 长短句交错而非均匀节奏
-- 具体情绪而非笼统情感
-- 平台和话题允许时使用第一人称
-- 自然重复最清晰的名词而非强制同义词轮换
-- 每段一个实在论点而非装饰性段落对称
-
-### 人的细节
-
-无论使用哪个风格预设，人类写作通常包含：
-
-- 细微的感官事实
-- 个人的不确定
-- 某个具体的限制
-- 一个被记住的瞬间
-- 一个略显不完美但真实的例子
-
-### 具体性底线
-
-文章不能只停留在正确、顺滑、完整。创建和改写时，必须检查每个核心论点是否至少落到一种具体材料上：
-
-- 一个具体场景：谁在什么时候、什么地方、遇到什么事
-- 一个具体动作：某人实际做了什么，而不是"推动/提升/优化"
-- 一个具体物件或界面：后台、聊天记录、表格、评论区、门店、会议室等
-- 一个具体数字：时间、次数、价格、比例、字数、成本、排名
-- 一个具体限制：哪里做不到、为什么不能更快、谁会反对
-
-如果素材里没有这些细节，不要编造。可以：
-
-- 向用户追问 1 个最关键细节
-- 用"不确定/我没看到更多信息"的方式降低断言强度
-- 把抽象论断改成观察或判断，而不是伪装成事实
-
-### 写作风格系统
-
-写作风格是"谁在说话"的声音身份，跨平台不变。平台形态是"在哪里说话"的容器约束，跨作者不变。两者正交组合（关键规则#3）。平台形态见 §平台形态；以下是写作风格的解析与运用。
-
-#### 风格来源与优先级
-
-按优先级解析，首个命中的生效：
-
-1. 用户本次请求的显式指令（"用犀利的风格"、"轻松一点"）
-2. EXTEND.md 中的 `custom_style`（内联自定义风格定义）
-3. EXTEND.md 中的 `writing_style`（内置风格预设名）→ 加载 `references/styles/{name}.yaml`
-
-#### 内置风格预设
-
-存放于 `references/styles/`，可直接在 `writing_style` 中引用：
-
-| 预设名 | 适合场景 |
-|--------|----------|
-| `lucid-tech` | 技术分析、产品评测、行业拆解 |
-| `life-observer` | 生活方式、个人成长、日常分享 |
-| `sharp-commentary` | 行业评论、观点输出、现象批评 |
-| `warm-narrative` | 故事型内容、人物特写、回忆录 |
-
-#### 自定义风格结构
-
-自定义风格（用户提供或从样本提取）用一组字段描述声音身份：`name`、`description`、`register`（语域）、`stance`（立场）、`sentence_rhythm`（句子节奏）、`paragraph_behavior`（段落行为）、`favorite_moves`（标志手法）、`words_to_keep`（标志词）、`words_to_avoid`（规避词）、`emotional_range`（情感范围）、`self_presence`（自我存在感）、`preferred_opening`（偏好开头：scene / contradiction / data / confession / problem）、`ending_style`（结尾方式）。带注释的完整 YAML 模板见 [references/config/extend-schema.md](references/config/extend-schema.md) 的 `custom_style` 字段。
-
-字段规则：
-
-- `words_to_avoid` 与 EXTEND.md 全局 `avoid_words` 取并集生效
-- `preferred_opening` 是偏好而非强制——内容需要时可选其他开头方式
-- Never 在风格定义里混入平台形态（段落字数、emoji 策略）——那属于 §平台形态
-
-#### 从用户样本提取风格
-
-当用户提供写作样本（"像我写的"、"保持我的风格"）时，读取样本并沿以下维度观察，填入上述字段结构（内部使用，除非用户要求否则不暴露）：
-
-句子长度、段落开篇方式、措辞（口语/文学/技术/讽刺/平实）、标点习惯、立场、第一人称频率、过渡风格（显性连接词还是跳切）、结尾习惯。
-
-提取完成后主动提示："要我把提取的风格保存到 EXTEND.md 的 `custom_style` 中？保存后下次自动使用。"
-
-匹配时的取舍：节奏优先于词汇；保留写作者日常用词，不要"升级"它们；保留无伤大雅的癖好——小瑕疵可能就是声音本身；除非用户要求，不照抄样本原句，不编造个人经历或传记细节。
-
-红线（不过度拟合）：样本有错别字→保留随意感不保留错误；样本愤怒→保留力度不保留辱骂；样本诗意→只在新主题撑得住的地方保留意象；样本正式→不强行注入俚语来显得"有人味"。
-
-#### 风格与平台冲突解决
-
-| 冲突类型 | 解决方式 |
-|---------|---------|
-| 写作风格要求长段落，平台形态要求短段落 | 平台形态优先——容器限制 |
-| 写作风格要求正式，平台形态建议口语化 | 写作风格优先——声音身份 |
-| 风格预设的 `preferred_opening` 与内容需要矛盾 | 内容需要优先——偏好非强制 |
-
-## 平台形态
-
-平台形态是容器约束，只管"在什么容器里说话"：段落结构、开篇模式、内容密度、读者注意力模型。适配微信或小红书时应用对应约束；其他平台继续写作但不套用平台特定规则。
-
-### 微信公众号
-
-读者状态：如果开篇能快速证明价值，愿意花几分钟阅读。
-
-形态约束：
-- 段落可中等长度（3-6 句），但段间节奏要有变化
-- 仅在有助于导航时使用标题；除非是指南类文章，避免"一、二、三"序号
-- 开篇前 3 句内建立冲突、场景或价值承诺
-- 结尾给具体收获，不要空话
-- 全文可较长（2000-5000 字），读者有耐心但需要持续回报——每段增加新信息，允许较复杂的论证层次，逻辑关系词可用但不堆砌过渡句
-- 使用 Markdown 语法（**加粗**、*斜体*、`行内代码`、> 引用块等）对关键观点、金句、术语或数据进行标记强调，提升视觉层次和扫读效率；但不过度装饰——标记服务于信息分层，不是排版炫技
-
-开篇模式（平台偏好）：
-- 适合：场景切入（"我最近反复遇到一个现象……"）、矛盾切入（"真正麻烦的不是 X，而是 Y。"）、数据切入（"如果只看热闹，会漏掉一个细节……"）
-- 不适合："随着时代发展……"、"近年来……受到广泛关注"、百科式背景介绍
-
-反面案例：官方报告式语气、每段强塞金句、过多励志口号。
-
-### 小红书
-
-读者状态：快速浏览，寻找有共鸣的经历或即时的实用价值。
-
-形态约束：
-- 段落极短：1-3 句一段，一段一个观点，不嵌套
-- 从具体痛点、个人场景或前后对比切入
-- 可用列表，但每条需有具体情境或行动
-- 全文较短（300-1200 字），信息密度要高，重点信息前置
-- emoji 可自然穿插，但不堆砌
-- 结尾给一个可行动的建议或真实感受
-
-开篇模式（平台偏好）：
-- 适合：场景切入（"我踩过这个坑。"）、问题切入（"如果你也有这个感觉，先别急着怪自己。"）、对比切入（"真正有用的是这一步……"）
-- 不适合：百科式解释、抽象概念堆砌、长篇铺垫
-
-反面案例："建议收藏"（除非帖子确实有参考价值）、学术式因果论证、超过 5 句的段落。
+写作风格与发布形态（平台×媒介）分开处理（关键规则#3）；active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve_preferences.py` 返回，无需直接读取 EXTEND.md 或数据文件。
 
 <!-- ========== 配置 ========== -->
 
@@ -259,7 +137,7 @@ python3 skills/human-media-writer/scripts/resolve_preferences.py \
 
 - **配置读取**：EXTEND.md 所在的 `.human-media-writer/` 是隐藏目录，且可能包含多个账号的大量风格资料。日常运行 MUST 调用 `scripts/resolve_preferences.py` 获取 active profile，Never 直接 `read` 完整 EXTEND.md，避免无关账号污染上下文。只有在创建、编辑或解释 EXTEND.md 本身时才读取完整配置文件。
 - **工作目录**：`{workspace_dir}` 是运行时占位符，由代理运行时环境自动替换为当前工作目录的实际路径。无需手动处理。
-- **子代理调度**：选题与审核需要派发子代理时，MUST 先读取对应子代理任务说明（`references/subagents/agents/*`），再读 `references/subagents/protocol.md` 与当前环境的 `references/subagents/adapters/` 规则（无匹配用 `generic.md`）。选题子代理只产出选题评审和 3 个推荐方案，不写正文；审核子代理只评估质量，不参与创作。创作正文 MUST 使用单代理完成（语气一致性需要一个思维贯穿全文）。Never 向审核子代理传递创作会话历史。
+- **子代理调度**：选题与审核需要派发子代理时，MUST 先读取对应任务说明（`references/tasks/*`），再读 `references/subagents/protocol.md` 与当前环境的 `references/subagents/adapters/` 规则（无匹配用 `generic.md`）。选题子代理只产出选题评审和 3 个推荐方案，不写正文；审核子代理只评估质量，不参与创作。创作正文 MUST 使用单代理完成（语气一致性需要一个思维贯穿全文）。Never 向审核子代理传递创作会话历史。
 - **用户提问工具**：需要向用户提问时，使用代理运行时内置的用户输入工具（AskUserQuestion、ask_user、clarify 或等效工具）。如果不存在此类工具，输出纯文本编号列表。尽量合并问题，一次最多问 3 个。
 
 ### 流程视图
@@ -329,15 +207,29 @@ flowchart TD
 
 其他平台：继续但不应用平台特定规则。
 
+### 媒介检测
+
+平台确定后再定媒介（载体）。媒介与平台组合为发布形态，决定叙事结构、开篇钩子、篇幅特性。
+
+| 信号 | 媒介 |
+|--------|----------|
+| 长文/深度/专栏文章 | article（长图文） |
+| 短图文/卡片/笔记/种草 | note（短图文笔记） |
+| 无明确信号 | active profile 的 `medium`，再无则按平台推断（微信→article，小红书→note） |
+
+"platform→默认 medium"回退表是媒介无信号时的兜底，避免媒介维度悬空。其他媒介：继续但不应用媒介特定规则。
+
+平台与媒介确定后，从 `references/platforms/{platform}-{medium}.md` 加载完整形态约束（合并了平台容器和媒介载体两层）。
+
 ### 工作流程
 
 | 模式 | 步骤 | 详细参考 |
 |------|-------|-----------------|
-| 选题 | 委派选题子代理 → 输入诊断 → 可选待定选题评审 → 输出3个方案 | [references/subagents/agents/topic-selection.md](references/subagents/agents/topic-selection.md) |
-| 创建 | 收集信息 → 委派选题子代理 → 语义锚点 → 写作风格 → 平台形态 → 起草 → 委派审核子代理 → 迭代修订 | [references/craft-workflow.md](references/craft-workflow.md) |
-| 改写 | 委派选题子代理评审/优化原选题 → 语义锚点 → 写作风格 → 平台形态 → 改写 → 委派审核子代理 → 迭代修订 | [references/rewrite-workflow.md](references/rewrite-workflow.md) |
-| 分析 | 全局扫描 → 深度分析 → 结构化笔记与可视化 → 创作衍生 → 选题优先级 → 衔接后续模式 | [references/analysis-workflow.md](references/analysis-workflow.md) |
-| 审核 | 语义锚点 → 委派审核子代理 → 呈现报告 | [references/reviewer-workflow.md](references/reviewer-workflow.md) |
+| 选题 | 委派选题子代理 → 输入诊断 → 可选待定选题评审 → 输出3个方案 | [references/tasks/topic-selection.md](references/tasks/topic-selection.md) |
+| 创建 | 收集信息 → 委派选题子代理 → 语义锚点 → 写作风格 → 平台 → 媒介 → 起草 → 委派审核子代理 → 迭代修订 | [references/workflows/craft.md](references/workflows/craft.md) |
+| 改写 | 委派选题子代理评审/优化原选题 → 语义锚点 → 写作风格 → 平台 → 媒介 → 改写 → 委派审核子代理 → 迭代修订 | [references/workflows/rewrite.md](references/workflows/rewrite.md) |
+| 分析 | 全局扫描 → 深度分析 → 结构化笔记与可视化 → 创作衍生 → 选题优先级 → 衔接后续模式 | [references/workflows/analysis.md](references/workflows/analysis.md) |
+| 审核 | 语义锚点 → 委派审核子代理 → 呈现报告 | [references/workflows/review.md](references/workflows/review.md) |
 
 各模式的详细步骤、子步骤和内部逻辑均定义在对应的参考文档中。
 
@@ -355,18 +247,21 @@ flowchart TD
 
 ### 参考文档加载规则
 
-先确定模式、平台和是否需要配置，再仅读取任务所需的参考文档。写作风格与平台形态已内联在本文件（§写作风格系统、§平台形态）；active profile 与风格参数由 `scripts/resolve_preferences.py` 返回，无需直接读取 EXTEND.md 或风格预设文件。以下为唯一权威加载清单：
+先确定模式、平台和是否需要配置，再仅读取任务所需的参考文档。active profile 与风格参数由 `scripts/resolve_preferences.py` 返回，无需直接读取 EXTEND.md 或风格预设文件。以下为唯一权威加载清单：
 
 | 触发条件 | 文档 |
 |----------|------|
-| 任何需要派发子代理的流程 | 任务说明 `references/subagents/agents/*.md` + `references/subagents/protocol.md` + 对应 `adapters/*.md` |
-| 分析模式 | `references/analysis-workflow.md` |
-| 选题模式，或创建/改写中需要前置选题环节 | `references/subagents/agents/topic-selection.md` |
+| 确定写作风格 / 从样本提取风格 / 处理风格与平台或媒介冲突 | `references/writing-style.md` |
+| 应用发布形态约束（平台容器 + 媒介载体） | `references/platforms/{platform}-{medium}.md` |
+| 内容形态转换输出 | `references/multi-format-output.md` |
+| 任何需要派发子代理的流程 | 任务说明 `references/tasks/*.md` + `references/subagents/protocol.md` + 对应 `adapters/*.md` |
+| 分析模式 | `references/workflows/analysis.md` |
+| 选题模式，或创建/改写中需要前置选题环节 | `references/tasks/topic-selection.md` |
 | 去除 AI 味、审核草稿或改写/编写中文文章 | `references/ai-tell-catalog-zh.md` |
-| 从话题、笔记、转录稿或素材完整创建文章 | `references/craft-workflow.md` |
-| 改写模式 | `references/rewrite-workflow.md` |
-| 审核模式（入口与场景路由） | `references/reviewer-workflow.md` |
-| 审核任务、交互模式与质量把关闭环 | `references/subagents/agents/article-review.md` |
+| 从话题、笔记、转录稿或素材完整创建文章 | `references/workflows/craft.md` |
+| 改写模式 | `references/workflows/rewrite.md` |
+| 审核模式（入口与场景路由） | `references/workflows/review.md` |
+| 审核任务、交互模式与质量把关闭环 | `references/tasks/article-review.md` |
 | 创建、编辑或解释 EXTEND.md | `references/config/extend-schema.md` |
 | 首次使用后保存偏好 | `references/config/first-use-setup.md` |
 

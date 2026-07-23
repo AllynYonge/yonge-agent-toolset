@@ -10,12 +10,14 @@ Known constraints:
 - `--dangerously-bypass-approvals-and-sandbox` is required to avoid interactive
   approval prompts during automated test runs.
 - Semantic assertions are judged through a separate `codex exec --json` turn.
+- Quality/json judges use the same non-interactive path and expect JSON objects.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -58,9 +60,13 @@ class CodexBackend(CommandTemplateBackend):
                 return str(obj["thread_id"])
         return None
 
-    def _extract_agent_text(self, text: str) -> str:
+    def extract_agent_messages(self, text: str) -> list[str]:
+        """Extract agent_message texts from Codex exec --json event stream."""
         chunks: list[str] = []
         for line in text.splitlines():
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
             try:
                 obj = json.loads(line)
             except Exception:
@@ -68,7 +74,14 @@ class CodexBackend(CommandTemplateBackend):
             item = obj.get("item")
             if isinstance(item, dict) and item.get("type") == "agent_message" and item.get("text"):
                 chunks.append(str(item["text"]))
-        return "\n".join(chunks) or text
+                continue
+            if obj.get("type") == "agent_message" and obj.get("text"):
+                chunks.append(str(obj["text"]))
+        return chunks
+
+    def _extract_agent_text(self, text: str) -> str:
+        chunks = self.extract_agent_messages(text)
+        return "\n".join(chunks) if chunks else text
 
     def semantic_prompt(self, assertion: dict[str, Any], text: str) -> str:
         rubric = assertion.get("rubric") or assertion.get("criteria") or assertion.get("value") or assertion.get("claim")
@@ -88,11 +101,33 @@ class CodexBackend(CommandTemplateBackend):
         if not spec.get("inherit_runtime_config", True):
             return
         real_home = self.real_home()
-        # Inherit config and auth so the test agent has model/provider settings.
+        # Inherit config/auth and local model-catalog files referenced by config.toml.
+        # Many local setups use relative paths like model_catalog_json = "cpa-router-models.json".
         for name in ["config.toml", "auth.json"]:
             src = real_home / name
             if src.exists():
                 shutil.copy2(src, home / name)
+
+        catalog_names = {
+            "cpa-router-models.json",
+            "cc-switch-model-catalog.json",
+            "models.json",
+        }
+        cfg_path = home / "config.toml"
+        if cfg_path.exists():
+            cfg_text = cfg_path.read_text(encoding="utf-8", errors="replace")
+            for match in re.finditer(r'model_catalog_json\s*=\s*["\']([^"\']+)["\']', cfg_text):
+                catalog_names.add(Path(match.group(1)).name)
+        for name in sorted(catalog_names):
+            src = real_home / name
+            if src.exists() and src.is_file():
+                shutil.copy2(src, home / name)
+
+        # Optional lightweight support files that some providers expect nearby.
+        rules_src = real_home / "rules"
+        rules_dst = home / "rules"
+        if rules_src.exists() and rules_src.is_dir() and not rules_dst.exists():
+            shutil.copytree(rules_src, rules_dst, dirs_exist_ok=True)
 
     def run_turn(
         self,
@@ -168,17 +203,27 @@ class CodexBackend(CommandTemplateBackend):
             return TurnResult(prompt, cmd, cp.returncode or 1, cp.stdout or "", stderr, "session_id")
         return TurnResult(prompt, cmd, cp.returncode, cp.stdout or "", cp.stderr or "")
 
-    def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+    def _run_codex_judge(
+        self,
+        prompt: str,
+        env: dict[str, str],
+        timeout: int,
+        *,
+        judge_model: str | None = None,
+    ) -> tuple[str, str]:
+        """Run a non-interactive Codex judge turn.
+
+        Returns (answer_text, error_or_empty).
+        """
         cmd = [
             "codex",
             "exec",
             "--json",
             "--dangerously-bypass-approvals-and-sandbox",
         ]
-        judge_model = assertion.get("judge_model")
         if judge_model:
             cmd += ["-m", str(judge_model)]
-        cmd.append(self.semantic_prompt(assertion, text))
+        cmd.append(prompt)
         try:
             cp = subprocess.run(
                 cmd,
@@ -187,27 +232,56 @@ class CodexBackend(CommandTemplateBackend):
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=int(assertion.get("timeout", timeout)),
+                timeout=int(timeout),
             )
         except subprocess.TimeoutExpired as e:
             raw = f"{e.stdout or ''}\n{e.stderr or ''}"
-            return False, f"semantic judge timeout after {int(assertion.get('timeout', timeout))}s: {raw[-500:]}"
+            return "", f"judge timeout after {int(timeout)}s: {raw[-500:]}"
         raw = (cp.stdout or "") + "\n" + (cp.stderr or "")
         if cp.returncode != 0:
-            return False, f"semantic judge exited {cp.returncode}: {raw[-500:]}"
-        answer = self._extract_agent_text(raw)
+            return "", f"judge exited {cp.returncode}: {raw[-500:]}"
+        return self._extract_agent_text(raw), ""
+
+    def run_json_judge(
+        self,
+        prompt: str,
+        env: dict[str, str],
+        timeout: int,
+        *,
+        judge_model: str | None = None,
+    ) -> tuple[Any | None, str]:
+        answer, err = self._run_codex_judge(prompt, env, timeout, judge_model=judge_model)
+        if err:
+            return None, err
         try:
             obj = json.loads(answer)
+            if isinstance(obj, (dict, list)):
+                return obj, "ok"
         except Exception:
-            import re
-
-            match = re.search(r"\{.*\}", answer, re.S)
-            if not match:
-                return False, f"semantic judge returned non-JSON: {answer[-500:]}"
+            pass
+        # Prefer later JSON values; models sometimes narrate before the payload.
+        candidates = list(re.finditer(r"(\{.*\}|\[.*\])", answer, re.S))
+        for match in reversed(candidates):
             try:
                 obj = json.loads(match.group(0))
-            except Exception as e:
-                return False, f"semantic judge JSON parse failed: {e}; raw={answer[-500:]}"
+                if isinstance(obj, (dict, list)):
+                    return obj, "ok"
+            except Exception:
+                continue
+        return None, f"json judge returned non-JSON: {answer[-500:]}"
+
+    def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+        judge_model = assertion.get("judge_model")
+        obj, detail = self.run_json_judge(
+            self.semantic_prompt(assertion, text),
+            env,
+            int(assertion.get("timeout", timeout)),
+            judge_model=str(judge_model) if judge_model else None,
+        )
+        if obj is None:
+            return False, f"semantic judge {detail}"
+        if "passed" not in obj:
+            return False, f"semantic judge missing passed field: {obj}"
         passed = bool(obj.get("passed"))
         reason = str(obj.get("reason", ""))
         return passed, reason or f"semantic judge passed={passed}"

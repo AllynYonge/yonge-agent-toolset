@@ -9,7 +9,7 @@
 subagents/
 ├── README.md
 ├── protocol.md
-├── task-template.md
+├── template.md
 └── adapters/
     ├── codex.md
     ├── claude-code.md
@@ -17,17 +17,19 @@ subagents/
     └── generic.md
 ```
 
+本目录只含**可移植的委派框架**，不含任何业务任务说明——业务任务（如选题、审核）放在目标 Skill 的 `references/tasks/`，使整个 `subagents/` 目录能原样复制到别的 Skill。
+
 | 文件 | 用途 |
 |------|------|
 | `protocol.md` | 共用委派规范 |
-| `task-template.md` | 子代理任务说明模板 |
+| `template.md` | 子代理任务说明模板 |
 | `adapters/*` | 各 Agent 环境差异与失败处理 |
 
 ## 复制到另一个 Skill
 
 1. 复制整个 `subagents/`，保持内部结构。  
 2. 在 `SKILL.md` 或业务流程中加入口说明。  
-3. 用 `task-template.md` 在目标 Skill 中定义具体任务（建议独立文件，如 `references/tasks/`）。  
+3. 用 `template.md` 在目标 Skill 中定义具体任务（放在独立目录 `references/tasks/`）。  
 4. 不要把业务规则写进 `protocol.md` 或适配器。
 
 推荐路径：`<target-skill>/references/subagents/`
@@ -60,7 +62,7 @@ subagents/
 
 ## 创建新任务
 
-1. 复制 `task-template.md` 到目标 Skill 的任务目录。  
+1. 复制 `template.md` 到目标 Skill 的任务目录。  
 2. 填：基本信息、上下文方式、任务输入、结果验收、任务提示词。  
 3. 在业务流程中引用该文件。  
 

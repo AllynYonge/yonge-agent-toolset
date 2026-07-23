@@ -1,7 +1,7 @@
 # 审核工作流
 
 本文件定义审核模式入口与场景路由。  
-单次审核任务、状态处置与质量把关闭环见 `references/subagents/agents/article-review.md`「交互模式」。
+单次审核任务、状态处置与质量把关闭环见 `references/tasks/article-review.md`「交互模式」。
 
 ## 审核模式
 
@@ -13,7 +13,7 @@
 
 ### 2. 执行文章审核任务
 
-将审核任务委派给 `references/subagents/agents/article-review.md` 子代理完成。
+将审核任务委派给 `references/tasks/article-review.md` 子代理完成。
 
 ### 3. 呈现报告
 

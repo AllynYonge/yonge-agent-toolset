@@ -25,6 +25,7 @@ from check_article_constraints import (
 
 DEFAULTS = {
     "platform": "auto",
+    "medium": "auto",
     "writing_style": "warm-narrative",
     "length": "auto",
     "deep": "low",
@@ -35,6 +36,7 @@ DEFAULTS = {
 RESERVED_GLOBAL_KEYS = {
     "default_profile",
     "platform",
+    "medium",
     "positioning",
     "audience",
     "purpose",
@@ -144,7 +146,7 @@ def load_style(skill_root: str, effective: Dict[str, Any]) -> tuple[Dict[str, An
     path = style_path(skill_root, style_name)
     if not os.path.exists(path):
         raise ConfigError(f"style preset '{style_name}' not found at {path}")
-    return load_yaml_file(path), path
+    return load_yaml_file(path, frontmatter=True), path
 
 
 def shell_args(parts: List[str]) -> str:
@@ -193,6 +195,8 @@ def build_profile_result(
     return {
         "active_profile": effective.get("_active_profile"),
         "effective_config": effective,
+        "platform": effective.get("platform", DEFAULTS["platform"]),
+        "medium": effective.get("medium", DEFAULTS["medium"]),
         "style_source": style_source,
         "style": style_config,
         "length": effective.get("length", DEFAULTS["length"]),

@@ -137,7 +137,47 @@ class AgentBackend:
     ) -> TurnResult:
         raise NotImplementedError
 
+    def extract_agent_messages(self, text: str) -> list[str]:
+        """Extract user-visible agent messages from raw backend stdout/stderr.
+
+        Backends with structured event streams (e.g. Codex JSONL) should override
+        this. Default returns an empty list so callers can fall back to raw text.
+        """
+        return []
+
+    def extract_candidate_output(self, blob: dict[str, str]) -> str:
+        """Return the user-visible candidate text for assertions and quality judges.
+
+        Prefers extracted agent messages from stdout; falls back to stdout+transcript.
+        """
+        stdout = blob.get("stdout", "") or ""
+        messages = self.extract_agent_messages(stdout)
+        if messages:
+            return "\n\n".join(m for m in messages if m and m.strip()).strip()
+        transcript = blob.get("transcript", "") or ""
+        combined = (stdout + ("\n" + transcript if transcript else "")).strip()
+        return combined
+
+    def run_json_judge(
+        self,
+        prompt: str,
+        env: dict[str, str],
+        timeout: int,
+        *,
+        judge_model: str | None = None,
+    ) -> tuple[Any | None, str]:
+        """Run a judge turn that must return JSON (object or array).
+
+        Returns (parsed_value_or_None, detail). detail is a short human-readable
+        status or error string. Backends without judge support return (None, reason).
+        """
+        return None, (
+            f"json judge is not supported for backend {self.name!r}; "
+            "set judge_backend to a backend that implements run_json_judge"
+        )
+
     def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+
         """Return (False, reason) instead of raising so the harness can report a
         clean assertion failure rather than an unhandled exception.
 

@@ -17,6 +17,7 @@ avoid_words:
 
 wechat-tech:
   platform: wechat
+  medium: article
   positioning: "泛技术人群的认知升级"
   audience: "25-40岁互联网从业者，关注效率与思维方式"
   purpose: "建立个人品牌，沉淀方法论内容资产"
@@ -28,7 +29,8 @@ wechat-tech:
     - 生态闭环
 
 xhs-lifestyle:
-  platform: xiaohongshu
+  platform: xhs
+  medium: note
   positioning: "生活方式分享与好物种草"
   audience: "20-35岁女性，追求品质生活"
   purpose: "变现（带货/广告合作）"
@@ -40,6 +42,7 @@ xhs-lifestyle:
 
 wechat-personal:
   platform: wechat
+  medium: article
   positioning: "个人思考与生活记录"
   audience: "熟人圈层，朋友和同事"
   purpose: "记录生活，保持表达习惯"
@@ -76,12 +79,13 @@ wechat-personal:
 
 | 字段 | 类型 | 默认值 | 说明 |
 |-------|------|---------|------|
-| `platform` | 字符串 | （推断） | `wechat` 或 `xiaohongshu` |
+| `platform` | 字符串 | （推断） | `wechat` 或 `xhs` |
+| `medium` | 字符串 | （推断） | 内容媒介（载体）：`article`（长图文）或 `note`（短图文笔记） |
 | `positioning` | 字符串 | （无） | 账号定位——一句话描述账号的内容方向和差异化角度 |
 | `audience` | 字符串 | （无） | 目标受众画像——描述核心读者群体特征 |
 | `purpose` | 字符串 | （无） | 做账号的最终目的——变现方式、品牌目标或个人动机 |
 | `writing_style` | 字符串 | `warm-narrative` | 内置预设名 |
-| `custom_style` | 对象 | （无） | 内联自定义写作风格（结构同 styles/*.yaml），优先级高于 `writing_style` |
+| `custom_style` | 对象 | （无） | 内联自定义写作风格（字段结构同 styles/*.md 的 frontmatter），优先级高于 `writing_style` |
 | `length` | 数字/字符串 | `auto` | 输出文章目标字数。数字、范围字符串（`"800-1200"`）或预设（`short`/`medium`/`long`/`auto`） |
 | `long_threshold` | 数字 | 3000 | 长内容流的字符数阈值 |
 | `output_dir` | 字符串 | （无） | 创建/改写完成后保存 Markdown 文章的目录；账号内配置可覆盖全局配置 |
@@ -92,6 +96,21 @@ wechat-personal:
 ### platform
 
 设置后将跳过平台推断。技能仍会遵循用户请求中明确提及的平台（这些会覆盖此值）。
+
+### medium
+
+内容媒介（载体），决定叙事结构、开篇钩子、篇幅特性，与平台组合为发布形态。技能从 `references/platforms/{platform}-{medium}.md` 加载对应约束。
+
+```yaml
+medium: article    # 长图文（公众号深度文、专栏）
+medium: note       # 短图文笔记（小红书笔记、公众号短图文）
+```
+
+**行为规则**：
+
+- 设置后跳过媒介推断；用户请求中明确提及的媒介（"写条笔记"、"写篇长文"）覆盖此值。
+- 未设置时按平台推断默认媒介：微信→article，小红书→note。
+- 媒介的篇幅特性是软性结构指导；与 `length` 硬约束冲突时**以 `length` 为准**（`length` 由脚本确定性校验，媒介篇幅只是载体倾向）。
 
 ### positioning
 
@@ -141,7 +160,7 @@ purpose: "记录生活，保持表达习惯"
 
 ### writing_style
 
-指定写作风格来源。值为内置预设名，技能从 `references/styles/{name}.yaml` 加载。
+指定写作风格来源。值为内置预设名，技能从 `references/styles/{name}.md` 加载（脚本读 frontmatter 字段，正文是给代理读的风格说明）。
 
 ```yaml
 writing_style: lucid-tech
@@ -203,7 +222,7 @@ output_dir: /Users/me/articles
 
 ### custom_style
 
-内联自定义写作风格，结构与 `references/styles/*.yaml` 相同。设置后优先级高于 `writing_style` 风格预设名。这是自定义风格字段结构的权威模板——SKILL.md §写作风格系统 只列字段名，需要照抄完整结构时读这里。
+内联自定义写作风格，字段结构与 `references/styles/*.md` 的 frontmatter 相同（custom_style 是 EXTEND.md 里的 dict，只有 frontmatter 字段、没有正文——正文是 styles 文件给代理读的说明，机器只读 `words_to_avoid`）。设置后优先级高于 `writing_style` 风格预设名。这是自定义风格字段结构的权威模板——`references/writing-style.md` §写作风格系统 只列字段名，需要照抄完整结构时读这里。
 
 ```yaml
 custom_style:
@@ -239,7 +258,7 @@ custom_style:
 - 所有值用自然语言描述——风格是连续谱，不是离散枚举
 - `words_to_avoid` 与全局 `avoid_words` 取并集生效
 - `preferred_opening` 是偏好而非强制——内容需要时可选其他开头方式
-- 不要在风格定义里混入平台形态（段落字数、emoji 策略）
+- 不要在风格定义里混入平台约束（段落字数、emoji 策略）或媒介约束（叙事结构、开篇钩子）
 
 **优先级**：`custom_style` > `writing_style` 预设名。
 

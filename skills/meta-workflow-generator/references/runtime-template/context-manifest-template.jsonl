@@ -1,0 +1,5 @@
+{"_example": "这是示例条目，生成时会被实际内容替换"}
+{"skill": "skill1", "type": "input", "source": "user", "description": "用户的初始需求描述"}
+{"skill": "skill2", "type": "input", "source": "skill1", "file": "{{skill1_output_path}}", "fields": ["{{field1}}", "{{field2}}"], "reason": "作为下一步的输入"}
+{"skill": "skill2", "type": "reference", "source": "domain-guide", "file": ".claude/skills/{{skill2_dir}}/references/domain-guide.md", "reason": "领域方法论参考"}
+{"skill": "skill3", "type": "input", "source": "skill2", "file": "{{skill2_output_path}}", "fields": ["{{field1}}", "{{field2}}"], "reason": "上游产出物"}

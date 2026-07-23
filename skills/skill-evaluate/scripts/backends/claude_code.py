@@ -181,7 +181,27 @@ class ClaudeCodeBackend(CommandTemplateBackend):
             pass
         return TurnResult(prompt, cmd, cp.returncode, cp.stdout or "", cp.stderr or "")
 
-    def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+    def extract_agent_messages(self, text: str) -> list[str]:
+        """Extract final result text from Claude Code json/text outputs."""
+        text = (text or "").strip()
+        if not text:
+            return []
+        try:
+            obj = json.loads(text)
+            if isinstance(obj, dict) and obj.get("result"):
+                return [str(obj.get("result"))]
+        except Exception:
+            pass
+        return [text]
+
+    def run_json_judge(
+        self,
+        prompt: str,
+        env: dict[str, str],
+        timeout: int,
+        *,
+        judge_model: str | None = None,
+    ) -> tuple[Any | None, str]:
         cmd = [
             "claude",
             "-p",
@@ -189,8 +209,9 @@ class ClaudeCodeBackend(CommandTemplateBackend):
             "json",
             "--dangerously-skip-permissions",
         ]
-        self._add_judge_model_flags(cmd, assertion)
-        cmd.append(self.semantic_prompt(assertion, text))
+        if judge_model:
+            cmd += ["--model", str(judge_model)]
+        cmd.append(prompt)
         try:
             cp = subprocess.run(
                 cmd,
@@ -199,14 +220,15 @@ class ClaudeCodeBackend(CommandTemplateBackend):
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=int(assertion.get("timeout", timeout)),
+                timeout=int(timeout),
             )
         except subprocess.TimeoutExpired as e:
             raw = f"{e.stdout or ''}\n{e.stderr or ''}"
-            return False, f"semantic judge timeout after {int(assertion.get('timeout', timeout))}s: {raw[-500:]}"
+            return None, f"judge timeout after {int(timeout)}s: {raw[-500:]}"
         raw = (cp.stdout or "") + "\n" + (cp.stderr or "")
         if cp.returncode != 0:
-            return False, f"semantic judge exited {cp.returncode}: {raw[-500:]}"
+            return None, f"judge exited {cp.returncode}: {raw[-500:]}"
+        answer = cp.stdout or ""
         try:
             cli_obj = json.loads(cp.stdout or "{}")
             answer = str(cli_obj.get("result") or cp.stdout or "")
@@ -214,16 +236,33 @@ class ClaudeCodeBackend(CommandTemplateBackend):
             answer = cp.stdout or raw
         try:
             obj = json.loads(answer)
+            if isinstance(obj, (dict, list)):
+                return obj, "ok"
         except Exception:
-            import re
-
-            match = re.search(r"\{.*\}", answer, re.S)
-            if not match:
-                return False, f"semantic judge returned non-JSON: {answer[-500:]}"
+            pass
+        import re as _re
+        candidates = list(_re.finditer(r"(\{.*\}|\[.*\])", answer, _re.S))
+        for match in reversed(candidates):
             try:
                 obj = json.loads(match.group(0))
-            except Exception as e:
-                return False, f"semantic judge JSON parse failed: {e}; raw={answer[-500:]}"
+                if isinstance(obj, (dict, list)):
+                    return obj, "ok"
+            except Exception:
+                continue
+        return None, f"json judge returned non-JSON: {answer[-500:]}"
+
+    def run_semantic_judge(self, assertion: dict[str, Any], text: str, env: dict[str, str], timeout: int) -> tuple[bool, str]:
+        judge_model = assertion.get("judge_model")
+        obj, detail = self.run_json_judge(
+            self.semantic_prompt(assertion, text),
+            env,
+            int(assertion.get("timeout", timeout)),
+            judge_model=str(judge_model) if judge_model else None,
+        )
+        if obj is None:
+            return False, f"semantic judge {detail}"
+        if not isinstance(obj, dict) or "passed" not in obj:
+            return False, f"semantic judge missing passed field: {obj}"
         passed = bool(obj.get("passed"))
         reason = str(obj.get("reason", ""))
         return passed, reason or f"semantic judge passed={passed}"

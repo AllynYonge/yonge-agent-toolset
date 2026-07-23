@@ -65,3 +65,109 @@
 ### 整体评估
 {流水线整体可用性判断 + 建议}
 ```
+
+---
+
+## 运行时层验证（复杂工作流）
+
+以下验证项仅在生成了运行时层（≥6 节点）时执行。
+
+### 验证清单
+
+| # | 检查项 | 验证方法 | 通过标准 |
+|---|---|---|---|
+| 1 | Hook 脚本可执行且语法正确 | `python -m py_compile .workflow/hooks/*.py` | 无语法错误 |
+| 2 | state.json 初始状态正确 | 检查 JSON 格式、必需字段、技能列表 | 符合 state-schema.json |
+| 3 | context-manifest.jsonl 覆盖所有技能 | 运行 `python .workflow/scripts/context.py validate` | 无缺失文件 |
+| 4 | workflow.md 的状态块与技能数量匹配 | 每个技能有对应的 `[workflow-state:skill{N}_in_progress]` 块 | 数量一致 |
+| 5 | workflow.py 命令可正常运行 | 运行 `python .workflow/scripts/workflow.py status` | 正常输出，退出码 0 |
+| 6 | 质量门配置完整 | workflow.md 包含"质量门配置"表格 | 每个技能有门禁级别 |
+
+### Hook 脚本测试
+
+```bash
+# 测试 SessionStart Hook
+echo '{"cwd": "'$(pwd)'"}' | python .workflow/hooks/session-start.py
+
+# 测试 UserPromptSubmit Hook
+echo '{"cwd": "'$(pwd)'"}' | python .workflow/hooks/inject-workflow-state.py
+
+# 检查输出 JSON 格式
+echo '{"cwd": "'$(pwd)'"}' | python .workflow/hooks/session-start.py | python -m json.tool
+```
+
+### 状态文件验证
+
+```bash
+# 验证 state.json 符合 schema
+python -c "
+import json
+from pathlib import Path
+
+state = json.loads(Path('.workflow/runtime/state.json').read_text())
+schema = json.loads(Path('.workflow/scripts/../runtime-template/state-schema.json').read_text())
+
+# 简单验证必需字段
+required = ['workflow_id', 'current_skill', 'skills']
+missing = [f for f in required if f not in state]
+if missing:
+    print(f'缺少必需字段: {missing}')
+    exit(1)
+
+print('✓ state.json 格式正确')
+"
+```
+
+### 工作流命令测试
+
+```bash
+# 测试所有命令
+python .workflow/scripts/workflow.py status
+python .workflow/scripts/workflow.py start
+python .workflow/scripts/workflow.py status
+python .workflow/scripts/workflow.py report
+
+# 测试上下文查询
+python .workflow/scripts/context.py list
+python .workflow/scripts/context.py validate
+```
+
+### 完整端到端测试
+
+1. 初始化状态：`python .workflow/scripts/workflow.py start`
+2. 验证 Hook 注入：启动 AI 会话，检查是否自动注入上下文
+3. 模拟技能完成：`python .workflow/scripts/workflow.py next --output "test.md"`
+4. 验证状态转换：`python .workflow/scripts/workflow.py status`
+5. 生成报告：`python .workflow/scripts/workflow.py report`
+6. 归档工作流：`python .workflow/scripts/workflow.py archive`
+
+---
+
+## 修正常见问题
+
+### 问题 1：Hook 脚本不可执行
+
+```bash
+chmod +x .workflow/hooks/*.py
+```
+
+### 问题 2：state.json 缺失或损坏
+
+重新初始化：
+```bash
+rm .workflow/runtime/state.json
+python .workflow/scripts/workflow.py start
+```
+
+### 问题 3：workflow.md 缺少状态块
+
+检查是否包含 `[workflow-state:STATUS]...[/workflow-state:STATUS]` 格式的块。
+
+### 问题 4：Python 版本过低
+
+确保 Python >= 3.7：
+```bash
+python --version
+# 或
+python3 --version
+```

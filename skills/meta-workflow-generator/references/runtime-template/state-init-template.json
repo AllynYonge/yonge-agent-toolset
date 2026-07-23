@@ -1,0 +1,29 @@
+{
+  "workflow_id": "{{workflow_name}}",
+  "created_at": "{{timestamp}}",
+  "current_skill": "no_active_task",
+  "skills": {
+    "skill1": {
+      "status": "pending",
+      "dependencies": [],
+      "gate_level": "strict",
+      "attempts": 0
+    },
+    "skill2": {
+      "status": "pending",
+      "dependencies": ["skill1"],
+      "gate_level": "standard",
+      "attempts": 0
+    },
+    "skill3": {
+      "status": "pending",
+      "dependencies": ["skill2"],
+      "gate_level": "standard",
+      "attempts": 0
+    }
+  },
+  "context": {
+    "user_preferences": {},
+    "corrections": []
+  }
+}

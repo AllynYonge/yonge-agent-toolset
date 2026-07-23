@@ -15,8 +15,8 @@ flowchart TD
     E --> F[6. 可视化笔记]
     F --> G[7. 创作衍生]
     G --> H[8. 下游衔接]
-    H --> H2[用户选定方向 → 生成选题交接信息 → craft-workflow.md]
-    H --> H3[用户选定方向 → 生成选题交接信息 → rewrite-workflow.md]
+    H --> H2[用户选定方向 → 生成选题交接信息 → workflows/craft.md]
+    H --> H3[用户选定方向 → 生成选题交接信息 → workflows/rewrite.md]
 ```
 
 ## 输出控制规则
@@ -319,7 +319,7 @@ Never 输出无法落地的空洞感悟（如"要保持开放心态"）——每
 
 | 用户意图 | 下游流程 | 交接方式 |
 |----------|----------|----------|
-| “按这个方向写一篇” / “就写方案 N” | `references/craft-workflow.md` | 将完整“选题交接信息”作为 `[CANDIDATE_TOPIC]` |
-| “按这个方向改写原文” / “用方案 N 改” | `references/rewrite-workflow.md` | 将完整“选题交接信息”作为 `[CANDIDATE_TOPIC]`，并保留原文语义锚点 |
+| “按这个方向写一篇” / “就写方案 N” | `references/workflows/craft.md` | 将完整“选题交接信息”作为 `[CANDIDATE_TOPIC]` |
+| “按这个方向改写原文” / “用方案 N 改” | `references/workflows/rewrite.md` | 将完整“选题交接信息”作为 `[CANDIDATE_TOPIC]`，并保留原文语义锚点 |
 
-进入下游流程后，craft-workflow 步骤 3 和 rewrite-workflow 步骤 2 的选题任务不可跳过——即使用户已经选了方向。分析方向是粗粒度创作灵感，下游选题任务负责评审并锐化为完整方案。
+进入下游流程后，craft 步骤 3 和 rewrite 步骤 2 的选题任务不可跳过——即使用户已经选了方向。分析方向是粗粒度创作灵感，下游选题任务负责评审并锐化为完整方案。

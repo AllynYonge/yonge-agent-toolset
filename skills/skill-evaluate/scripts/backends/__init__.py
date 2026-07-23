@@ -9,7 +9,7 @@ from .hermes import HermesBackend
 
 
 def get_backend(name: str | None) -> AgentBackend:
-    backend_name = (name or "hermes").replace("-", "_").lower()
+    backend_name = (name or "codex").replace("-", "_").lower()
     if backend_name == "hermes":
         return HermesBackend()
     if backend_name == "codex":
@@ -17,4 +17,3 @@ def get_backend(name: str | None) -> AgentBackend:
     if backend_name in {"claude_code", "claude"}:
         return ClaudeCodeBackend()
     raise ValueError(f"unknown backend {name!r}; expected hermes, codex, or claude_code")
-

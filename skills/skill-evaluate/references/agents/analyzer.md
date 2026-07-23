@@ -1,6 +1,9 @@
 # Analyzer Agent
 
-当行为断言失败时，由运行 skill-testing 的 agent 作为子 agent 调用，生成结构化诊断建议。
+> 更完整的归因分析方法论可参考 skill-creator 的 `agents/analyzer.md`（用 `creator.py` 的 `agent_path("analyzer.md")` 取路径）。
+> 本文件固定 skill-evaluate 自己的诊断契约——L1 行为循环按这里的 JSON 结构调用它。
+
+当行为断言失败时，由运行 skill-evaluate 的 agent 作为子 agent 调用，生成结构化诊断建议。
 
 ## 输入
 
@@ -46,4 +49,4 @@
 - `root_cause` 只能是三选一：`spec`（断言/正则写法问题）、`env`（超时/配置/加载问题）、`skill`（目标 skill 行为偏差）
 - 当 confidence < 0.5 时，必须在 rationale 中说明不确定的原因
 - 不建议添加机械标记文本（如"请输出 [确认]"）来通过测试
-- 建议必须指向用户利益的改善，而非仅让断言通过
+- 建议必须指向用户价值的改善，而非仅让断言通过

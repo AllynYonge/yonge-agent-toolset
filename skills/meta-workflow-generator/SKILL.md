@@ -30,13 +30,85 @@ metadata:
 
 ## 模式选择
 
-| 条件 | 模式 | 说明 |
-|---|---|---|
-| 预估节点 ≤ 4，无复杂依赖 | 快速模式 | 3 步完成，1-2 轮对话 |
-| 预估节点 ≥ 5，或有复杂依赖/并行/循环 | 完整模式 | 5 步完成，含架构确认 |
-| 无法预估 | 先执行步骤 1，根据结果建议模式 | — |
+## 模式选择
+
+| 条件 | 模式 | 运行时层 | 说明 |
+|---|---|---|---|
+| 预估节点 ≤ 4，无复杂依赖 | 快速模式 | 无 | 3 步完成，1-2 轮对话，纯技能模式 |
+| 预估节点 5-6，线性流水线 | 完整模式 | Hook + 脚本 | 生成 .workflow/ 目录，支持状态追踪和中断恢复 |
+| 预估节点 ≥ 6，有分支/并行/循环 | 完整模式 | Hook + 脚本 + 编排器 | 完整运行时层 + 独立编排技能 |
+| 无法预估 | 先执行步骤 1，根据结果建议模式 | 待定 | — |
 
 用户可通过 `--quick` 或 `--full` 参数强制指定模式。
+
+**运行时层说明**：
+- **无**：纯技能模式，技能通过"工作流协同"章节衔接
+- **Hook + 脚本**：生成 SessionStart/UserPromptSubmit Hook 和 workflow.py 管理脚本，支持状态持久化
+- **Hook + 脚本 + 编排器**：额外生成独立编排技能，管理非线性依赖（分支/并行/循环）
+
+---
+
+## 运行时层特性（≥6 节点时自动生成）
+
+当工作流包含 6 个或以上技能节点时，自动生成运行时层：
+
+### 目录结构
+
+```
+.workflow/
+├── hooks/                       # Hook 脚本（自动注入上下文）
+│   ├── session-start.py         # 会话开始时注入工作流全景
+│   └── inject-workflow-state.py # 每次用户输入时注入当前状态提示
+├── runtime/                     # 运行时数据
+│   ├── state.json               # 工作流执行状态
+│   ├── context-manifest.jsonl   # 技能上下文清单
+│   └── session-memory.md        # 会话记忆（自动记录）
+├── workflow.md                  # 工作流定义（含状态提示块）
+└── scripts/                     # 管理脚本
+    ├── workflow.py              # 状态查询、进度追踪、中断恢复
+    └── context.py               # 上下文查询工具
+```
+
+### 核心功能
+
+1. **Hook 自动注入**
+   - SessionStart：注入工作流全景、当前进度、已完成/待执行技能列表
+   - UserPromptSubmit：注入当前状态对应的操作提示（从 workflow.md 的 `[workflow-state:STATUS]` 块解析）
+
+2. **状态持久化**
+   - state.json 记录每个技能的执行状态（pending/in_progress/completed/failed/skipped）
+   - 支持中断恢复：会话中断后，从上次进度继续
+   - 产出物路径追踪：记录每个技能的输出文件
+
+3. **质量门系统**
+   - 三级门禁：严格/标准/宽松
+   - 自动分配：第一个和最后一个技能为严格，普通节点为标准，辅助节点为宽松
+   - 未通过处理：严格/标准级退回修正，宽松级标注问题继续推进
+
+4. **会话记忆**
+   - 自动记录：技能重试、门禁退回、用户修正、降级模式、分支决策
+   - 格式化存储：问题-原因-解法-影响范围-状态
+   - 下次执行时自动加载最近 10 条，避免重复错误
+
+5. **工作流管理命令**
+   ```bash
+   python .workflow/scripts/workflow.py status    # 显示当前状态
+   python .workflow/scripts/workflow.py start     # 启动工作流
+   python .workflow/scripts/workflow.py next      # 标记当前技能完成，进入下一个
+   python .workflow/scripts/workflow.py skip      # 跳过当前技能
+   python .workflow/scripts/workflow.py report    # 生成执行报告
+   python .workflow/scripts/workflow.py archive   # 归档工作流
+   ```
+
+### 平台兼容性
+
+运行时层适配多种 AI 编码平台：
+- Claude Code / Cursor / Codex / Gemini / Qoder / CodeBuddy
+- 自动检测平台并适配 Hook 事件名（Gemini 使用 `BeforeAgent`，其他使用 `UserPromptSubmit`）
+- Windows 特殊处理：UTF-8 强制编码、路径规范化
+
+详细说明见 `references/runtime-guide.md`。
+
 
 ---
 

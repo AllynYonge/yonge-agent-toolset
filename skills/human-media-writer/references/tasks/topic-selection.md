@@ -27,7 +27,7 @@
 
 1. `[MATERIAL]`：用户提供的话题、素材、笔记、转录稿、待改写原文或必要背景
 2. `[CANDIDATE_TOPIC]`：用户标题/角度/方向；分析模式则填完整「选题交接信息」；无则填 `（空）`
-3. `[PROFILE_CONTEXT]`：active profile 的 `positioning`、`audience`、`purpose`；无则填 `（空）`
+3. `[PROFILE_CONTEXT]`：active profile 的 `positioning`、`audience`、`purpose`，以及目标 `platform` 与 `medium`（供选题贴合载体——长图文可承载多论点深挖，短笔记需单点可扫读）；无则填 `（空）`
 
 ## 结果验收
 
@@ -47,7 +47,9 @@
 
 ## 输入参数
 
-- 账号定位信息：[PROFILE_CONTEXT]
+- 账号定位信息（含目标平台与媒介载体）：[PROFILE_CONTEXT]
+
+如果定位信息里给了目标平台与媒介，让 3 个方案贴合该载体：长图文可承载需要多论点深挖的选题，短笔记则偏向单点、可扫读、能一屏说清的选题。
 
 ## 素材/文章内容
 

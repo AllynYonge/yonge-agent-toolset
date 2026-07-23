@@ -211,7 +211,7 @@ def unique_words(groups: Iterable[Iterable[Any]]) -> List[str]:
 
 
 def style_path(skill_root: str, style_name: str) -> str:
-    return os.path.join(skill_root, "references", "styles", f"{style_name}.yaml")
+    return os.path.join(skill_root, "references", "styles", f"{style_name}.md")
 
 
 def resolve_constraints(
@@ -244,7 +244,7 @@ def resolve_constraints(
         path = style_path(skill_root, style_name)
         if not os.path.exists(path):
             raise ConfigError(f"style preset '{style_name}' not found at {path}")
-        style_config = load_yaml_file(path)
+        style_config = load_yaml_file(path, frontmatter=True)
         style_source = path
 
     avoid_words = unique_words(

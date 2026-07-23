@@ -1,4 +1,4 @@
-# Spec schema
+# Spec 字段规范
 
 Use this file when writing or reviewing a behavior test spec.
 
@@ -15,7 +15,8 @@ Use this file when writing or reviewing a behavior test spec.
 
 | Field | Default | Description |
 |---|---|---|
-| `backend` | `hermes` | `hermes`, `codex`, or `claude_code` |
+| `backend` | `codex` | 执行后端：`codex`、`hermes` 或 `claude_code` |
+| `level` | `auto` | 手动固定迭代层级：`auto`（从 L1 起逐层解锁）/ `L1`（只做行为检查）/ `L2`（直接进质量评估，隐含 `quality.iterate: true`）/ `L3`（直接进提升探索，隐含 `aspiration.enabled: true`）。只改起点/上限，不豁免采纳判定——进 L2/L3 前 L1 仍须全通过 |
 | `timeout` | `240` | Per-turn timeout in seconds |
 | `agent_max_turns` | `20` | Agent 单次运行的最大推理步数（tool call 循环上限） |
 | `toolsets` | — | Toolsets passed to `hermes chat --toolsets` (Hermes only) |
@@ -23,7 +24,10 @@ Use this file when writing or reviewing a behavior test spec.
 | `related_skills` | `[]` | Extra skills to copy into the temp home |
 | `model` | — | Model name; passed as `--model` (Hermes) or `-m` (Codex) |
 | `provider` | — | Provider name; passed as `--provider` (Hermes only) |
-| `judge_backend` | tested backend | Backend used for `semantic`/`not_semantic` assertions; set only when judging with a different backend |
+| `judge_backend` | tested backend | 用于 `semantic` / `not_semantic` 断言的评审后端；未指定时使用被测后端 |
+| `gate` | 见下 | 多维度采纳判定阈值覆盖（`min_delta` / `max_token_increase` / `min_stability` / `noise_threshold`），详见 [gate-and-memory.md](gate-and-memory.md) |
+| `aspiration` | 未启用 | 提升探索配置；`enabled` 控制是否进入 L3，`discoverer_prompt` 提供可选探索方向，由迭代流程读取 |
+| `memory` | `true` | 是否写跨迭代记忆到 `test/memory/`（results.tsv / experiments.jsonl / best_versions），详见 [gate-and-memory.md](gate-and-memory.md) |
 | `conversation_mode` | `native_session` | 会话策略：`native_session` = 真实多轮对话续接；`isolated` = 每轮独立进程 |
 | `command_template` | backend default | Command template for Codex/Claude Code backends |
 | `inherit_runtime_config` | `true` | Inherit config/credentials from the real backend home |
@@ -80,7 +84,9 @@ the older independent-process behavior.
 | `tool_called` | `name` | Tool name appears in transcript/stdout heuristic |
 | `tool_not_called` | `name` | Tool name absent from transcript/stdout |
 
-`target` values: `stdout`, `stderr`, `transcript`, `all`
+`target` values: `stdout`, `stderr`, `transcript`, `final_text`, `agent_messages`, `last_agent_message`, `all`
+
+Prefer `final_text` / `agent_messages` for user-visible behavior checks on Codex JSON streams. `stdout` remains the raw event log and is easy to overfit with brittle regexes.
 
 ## Quality evaluation (optional)
 
@@ -117,6 +123,7 @@ to failing cases.
 | `baseline` | `null` | Baseline comparison config (see below) |
 | `thresholds` | `null` | Quality threshold config (see below) |
 | `iterate` | `false` | Enable quality iteration when thresholds not met |
+| `max_candidate_chars` | `20000` | Max chars of extracted candidate text sent to quality judges |
 | `max_iterations` | `2` | Max quality iteration attempts (1-5) |
 
 ### Baseline comparison (optional)
@@ -163,11 +170,11 @@ When thresholds are configured, the quality report includes `threshold_passed` (
 Run the harness multiple times for statistical stability analysis:
 
 ```bash
-python3 stability.py [spec] --skill <name> --scenario <scenario> --runs 3
+python3 stability.py [spec] --skill <name> --scenario <scenario> --runs 3 [--case <id>] [--assertions-only]
 ```
 
 Output is a stability report with per-assertion `pass_rate` and `classification`:
-- `stable_pass` (≥0.9) / `stable_fail` (≤0.1) / `flaky` (0.3-0.7) / `mostly_pass` / `mostly_fail`
+- `stable_pass`（≥0.9）/ `mostly_pass`（0.7–<0.9）/ `flaky`（0.3–0.7）/ `mostly_fail`（>0.1–<0.3）/ `stable_fail`（≤0.1）
 
 Exit codes: 0=stable, 1=error, 2=flaky detected.
 
@@ -180,8 +187,8 @@ python3 humanloop.py [spec] --skill <name> --scenario <scenario> --runs 3
 ```
 
 Triggers for human input:
-- Semantic assertion pass_rate in 0.3-0.7 (flaky)
-- Quality dimension score at threshold boundary (== min_score or min_score-1)
+- 语义断言 pass_rate 在 0.3–0.7（`flaky`）
+- 质量维度得分等于阈值或低于阈值 1 分
 - Behavior iteration exhausted (3x failed)
 - Baseline delta negative (regression)
 
@@ -200,7 +207,7 @@ User decisions are saved to `clarifications.json`:
 ]
 ```
 
-Rubric convergence: when a user provides clarification text for a `quality_borderline` trigger with choice "1" (raise standard), the text is appended to the spec's `quality.rubrics` for that dimension, making future judge evaluations more stable and reducing future humanloop triggers.
+评分标准逐步明确：当用户针对 `quality_borderline` 触发器选择“提高标准”并提供补充文本时，文本会追加到该维度的 `quality.rubrics`，以便后续评审标准更明确。
 
 ### Quality report output
 
@@ -229,3 +236,50 @@ When quality evaluation runs, each case in the report gains a `quality` field:
 
 The top-level report also includes:
 - `"quality_passed": true|false` — aggregate: all behaviorally-passing cases meet quality thresholds
+
+## 采纳判定配置（可选）
+
+顶层 `gate` 字段覆盖多维度采纳判定的默认阈值。省略则用默认值。判定逻辑见 [gate-and-memory.md](gate-and-memory.md)。
+
+```json
+{
+  "gate": {
+    "min_delta": 0.02,
+    "max_token_increase": 0.20,
+    "min_stability": 0.8,
+    "noise_threshold": 0.01
+  }
+}
+```
+
+| 字段 | 默认 | 含义 |
+|------|------|------|
+| `min_delta` | 0.02 | 质量最小提升幅度（低于此不算提升） |
+| `max_token_increase` | 0.20 | token 使用量最多增加 20% |
+| `min_stability` | 0.8 | 采纳判定使用的多次运行 pass_rate 下限；它不同于 `stable_pass` 的分类阈值 0.9 |
+| `noise_threshold` | 0.01 | 小于此幅度的变化视为噪声 |
+
+
+## Replay / filter flags (harness CLI)
+
+| Flag | Meaning |
+|---|---|
+| `--case <id>` | Run/replay only selected case ids (repeatable or comma-separated) |
+| `--replay-report <path>` | Re-evaluate using trajectories stored in an existing report |
+| `--assertions-only` | Skip quality evaluation |
+| `--quality-only` | With `--replay-report`, recompute quality from stored trajectories |
+
+
+## Report naming
+
+Default report filenames are derived from the **spec file stem** and evaluation level:
+
+| Level | Default name |
+|---|---|
+| L1 | `<spec-stem>-l1-report.json` |
+| L2 | `<spec-stem>-l2-report.json` |
+| L3 | `<spec-stem>-l3-report.json` |
+
+Example: `article-analysis-behavior.json` -> `article-analysis-behavior-l2-report.json`.
+
+Use CLI `--level L1|L2|L3` to force the level used for naming and run mode. Prefer hyphenated spec names for new specs.

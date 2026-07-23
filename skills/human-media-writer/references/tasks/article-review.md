@@ -31,14 +31,14 @@ Never 把「主代理闭环」写入任务提示词或传给子代理。
 |----------|------------|
 | 格式不全（缺状态行/报告结构/字段） | 原 ID 验收补齐一轮；仍不符 → `result_invalid` |
 | `PASS` | 交回业务流程；与确定性约束合并后决定是否交付 |
-| `NEEDS_REVISION` | 质量把关 → 主代理闭环；独立审核 → 只呈现，不自动修（场景见 `reviewer-workflow.md`） |
+| `NEEDS_REVISION` | 质量把关 → 主代理闭环；独立审核 → 只呈现，不自动修（场景见 `references/workflows/review.md`） |
 | `ERROR` / 调度失败 / 依赖文件失败 | 按 protocol；不进入闭环；不计入有效审核轮次 |
 
 仅 `PASS` / `NEEDS_REVISION` 的完整报告计有效轮次。
 
 ### 主代理闭环
 
-- **进入**：`reviewer-workflow.md` 判定为质量把关，且有效结果为 `NEEDS_REVISION`
+- **进入**：`references/workflows/review.md` 判定为质量把关，且有效结果为 `NEEDS_REVISION`
 - **不进入**：独立审核；`PASS`；`ERROR` / 非有效轮次
 
 ```mermaid
@@ -171,12 +171,13 @@ flowchart TD
 
 - MUST 按 AI 痕迹目录中 P0→P1-L→P1-S→P2 顺序逐类扫描
 - MUST 每个类别先用检测原则判断是否命中，再用典型表现校准置信度
+- MUST 扫描前先识别文章中的人味保护项：具体而少见的细节、真实的矛盾情绪、自然插话与自我修正、作者稳定口头禅和明确个人判断
+- MUST 仅在条目阈值、保护区域、平台/文体/作者风格和实质影响四项均核对后报告问题；单一词汇、标点或句式不能独立构成 P1/P2 问题
 - MUST 只报告能由文章原文和审核规则直接支持的问题
 - MUST 没有命中时写“无”
 
 禁止：
 
-- Never 创建或委派其他子代理
 - Never 修改原文或任何文件
 - Never 向用户提问
 - Never 输出完整改写稿

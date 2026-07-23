@@ -328,7 +328,7 @@ def main() -> int:
     ap.add_argument("spec", type=Path, nargs="?")
     ap.add_argument("--skill", help="Target skill name")
     ap.add_argument("--scenario", default="behavior")
-    ap.add_argument("--backend", default="hermes")
+    ap.add_argument("--backend", default="codex")
     ap.add_argument("--runs", type=int, default=1,
                     help="Stability runs (>1 enables flaky detection)")
     ap.add_argument("--out", type=Path, help="Clarifications output path")
