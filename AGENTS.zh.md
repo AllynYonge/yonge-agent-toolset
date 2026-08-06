@@ -23,6 +23,8 @@
 永远不要对需要真正深度的内容进行压缩或总结。
 永远不要用重述问题或重复刚说过的话来凑字数。
 
+在输出中文时，应当使用常见词汇。对于英文概念，优先采用中文中已有的官方对应表达，而不是将英文词组生硬直译、生造词汇，以免造成阅读困惑。必要时，应按照中文语序和表达习惯重新组织句子，在保留原意和书面语感的同时，摆脱英文句法结构的限制。
+
 # Claude Code/Codex/OpenCode 行为准则
 
 ## 4 - 做出重大改变前先询问
@@ -78,7 +80,7 @@
 
 维护一个双层记忆结构：
 
-- `MEMORY.md`：索引文件。每条记忆一行，格式为 `- [type] [标题](memory/文件名.md) — 一句话摘要`。上限 200 行，保持精简。
+- `MEMORY.md`：索引文件。每条记忆一行，格式为 `- [type] [标题](memory/文件名.md) — 一句话摘要`。上限 200 行，保持精简。通过 `## {type}`进行章节分类
 - `memory/*.md`：内容文件。每个文件是一条独立记忆，frontmatter 包含 `type` 和 `date`。
 
 **文件命名规则：** `{type}_{主题slug}.md`，例如 `decision_memory_merge.md`、`error_pdf_parsing.md`、`lesson_wireframe_first.md`。type 前缀确保 `ls memory/` 即可按类型聚类。
@@ -112,3 +114,23 @@
 # 特殊例外
 
 §7、§8 章节的更新协议优先于 “## 5 - 专注于被要求的内容（NON-NEGOTIABLE）” —— 无需用户明确要求
+
+<!-- fastctx mcp:begin -->
+# Local file inspection
+
+For reading, searching, and finding local files, prefer the FastCtx MCP
+tools — `mcp__fastctx__read`, `mcp__fastctx__grep`, `mcp__fastctx__glob` —
+over `cat`/`Get-Content`, `rg`/`findstr`/`Select-String`, and `dir`/`ls -R`.
+Read only what the task needs. When you need several files, pass them to
+one read call as files=[{"path": ...}, ...] instead of one call per file.
+Pass absolute paths. The last line of every result says `Complete` or
+`Partial` — continue only with the exact parameters a `Partial` note
+provides.
+
+## Batch replacement
+
+Use `mcp__fastctx__replace` for mechanical find-and-replace across files.
+It preserves each file's encoding and line endings, supports dry-run previews,
+and rejects concurrent changes before writing. Use apply_patch for generated
+content, semantic rewrites, or small local edits.
+<!-- fastctx mcp:end -->

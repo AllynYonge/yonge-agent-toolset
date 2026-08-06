@@ -1,9 +1,3 @@
-- [error] [skill-evaluate Codex 质量评审假失败](memory/error_skill_evaluate_codex_quality_judge.md) — Codex raw JSON 断言过死 + quality/semantic judge 协议不匹配会造成 L1/L2 假失败
 - [lesson] [AGENTS.zh.md 编辑原则](memory/feedback_AGENTS_CLAUDE_editing_rules.md) — 修改原则条目时：抽象优于具象，按决策性质分类而非场景枚举
 - [lesson] [重大页面设计先出线框图](memory/feedback_impeccable_wireframe_first.md) — 任何重大系统页面设计必须先 ASCII 线框图确认再实施
-- [decision] [技能反馈自动沉淀与清理策略](memory/decision_skill_auto_feedback.md) — Claude/Codex 共用会话外 Hook 脚本，仅沉淀高置信度反馈，`--clearup` 校验后直接删除原文档
-- [error] [lark-cli docs update content file path](memory/error_lark_cli_update_content_file_path.md) — `docs +update --content @file` 只能使用当前工作目录内的相对路径，不能传绝对路径
 - [error] [Feishu/Lark 文档 generic 抓取截断](memory/error_feishu_doc_generic_truncation.md) — 飞书/Lark Wiki/Docx 的 generic 抓取可能只得目录和开头，应优先用 lark-cli `docs +fetch` 或 `lark-doc` 适配器
-- [error] [Codex CLI image backend timeout](memory/error_imagegen_codex_cli_timeout.md) — 小红书卡片生成中 codex-cli 可能不调用 image_gen 或超时，优先切到 baoyu-image-gen RunningHub/API 后端。
-- [decision] [human-media-writer 多形态聚合输出](memory/decision_human_media_multiform_output.md) — 一稿多形态聚合进单文件，用 # wechat-article / # wechat-note / # xhs-note 分区，转写时就地追加、目标分区已有则覆盖重写
-- [decision] [human-media-writer 目录分层](memory/decision_human_media_dir_layout.md) — knowledge/workflows/tasks/subagents 四层语义；subagents/ 只放可移植框架不放业务任务，styles 路径被脚本硬编码

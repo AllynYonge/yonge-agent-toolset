@@ -1,0 +1,11 @@
+{
+  "modes": {
+    "dev": [
+      "../skills/browser",
+      "../skills/documents"
+    ],
+    "research": [
+      "../skills/article-analysis"
+    ]
+  }
+}

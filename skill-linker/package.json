@@ -1,0 +1,29 @@
+{
+  "name": "@yonge/skill-linker",
+  "version": "0.1.0",
+  "description": "Link configured SKILL directories into the current working directory.",
+  "type": "module",
+  "bin": {
+    "skill-linker": "./dist/src/cli.js"
+  },
+  "files": [
+    "dist/src",
+    "README.md",
+    "skill-linker.config.example.json"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test dist/test/config.test.js dist/test/linker.test.js",
+    "prepublishOnly": "npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
