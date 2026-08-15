@@ -1,10 +1,12 @@
-import { lstat, stat, symlink, unlink } from "node:fs/promises";
+import { lstat, mkdir, stat, symlink, unlink } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import { ConfigError, resolveSourcePath } from "./config.js";
+import { type Platform, resolvePlatformDirectory } from "./platform.js";
 
 export interface CreatedLink {
   name: string;
+  destination: string;
   target: string;
   replaced: boolean;
 }
@@ -99,16 +101,47 @@ async function getDestinationKind(destination: string): Promise<"missing" | "sym
   }
 }
 
+async function ensurePlatformDirectory(
+  cwd: string,
+  platform: Platform,
+): Promise<{ directory?: string; warning?: string }> {
+  const directory = resolvePlatformDirectory(cwd, platform);
+
+  try {
+    await mkdir(directory, { recursive: true });
+    return { directory };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      warning: `WARN: skipped platform ${platform} - cannot create ${directory} (${detail})`,
+    };
+  }
+}
+
 export async function linkMode(
   mode: string,
   sources: string[],
   configDirectory: string,
   cwd: string = process.cwd(),
+  platforms: readonly Platform[] = ["codex"],
 ): Promise<LinkResult> {
   findDuplicateNames(mode, sources, configDirectory);
 
   const result: LinkResult = { created: [], warnings: [] };
   const linkType = process.platform === "win32" ? "junction" : "dir";
+  const platformDirectories: string[] = [];
+
+  for (const platform of platforms) {
+    const ensured = await ensurePlatformDirectory(cwd, platform);
+    if (ensured.warning !== undefined) {
+      result.warnings.push(ensured.warning);
+    }
+    if (ensured.directory !== undefined) {
+      platformDirectories.push(ensured.directory);
+    }
+  }
+
+  const validSources: Array<{ name: string; target: string }> = [];
 
   for (const rawSource of sources) {
     const resolvedSource = getSourcePath(rawSource, configDirectory);
@@ -123,21 +156,26 @@ export async function linkMode(
       continue;
     }
 
-    const name = basename(resolvedSource as string);
-    const destination = resolve(cwd, name);
-    const destinationKind = await getDestinationKind(destination);
+    validSources.push({ name: basename(resolvedSource as string), target: resolvedSource as string });
+  }
 
-    if (destinationKind === "other") {
-      continue;
+  for (const directory of platformDirectories) {
+    for (const source of validSources) {
+      const destination = resolve(directory, source.name);
+      const destinationKind = await getDestinationKind(destination);
+
+      if (destinationKind === "other") {
+        continue;
+      }
+
+      const replaced = destinationKind === "symlink";
+      if (replaced) {
+        await unlink(destination);
+      }
+
+      await symlink(source.target, destination, linkType);
+      result.created.push({ name: source.name, destination, target: source.target, replaced });
     }
-
-    const replaced = destinationKind === "symlink";
-    if (replaced) {
-      await unlink(destination);
-    }
-
-    await symlink(resolvedSource as string, destination, linkType);
-    result.created.push({ name, target: resolvedSource as string, replaced });
   }
 
   return result;

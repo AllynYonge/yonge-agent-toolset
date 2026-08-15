@@ -43,12 +43,21 @@ describe("linkMode", () => {
       [source, join(root, "missing-skill")],
       root,
       destination,
+      ["codex", "claude"],
     );
 
-    assert.equal(result.created.length, 1);
+    assert.equal(result.created.length, 2);
     assert.equal(result.created[0]?.name, "valid-skill");
+    assert.equal(result.warnings.length, 1);
     assert.match(result.warnings[0] ?? "", /directory does not exist/);
-    assert.equal(await realpath(join(destination, "valid-skill")), await realpath(source));
+    assert.equal(
+      await realpath(join(destination, ".codex", "skills", "valid-skill")),
+      await realpath(source),
+    );
+    assert.equal(
+      await realpath(join(destination, ".claude", "skills", "valid-skill")),
+      await realpath(source),
+    );
   });
 
   it("replaces an existing symlink", async () => {
@@ -57,13 +66,16 @@ describe("linkMode", () => {
     const oldTarget = await makeSkill(root, "old-target");
     const destination = join(root, "output");
     const { mkdir } = await import("node:fs/promises");
-    await mkdir(destination);
-    await symlink(oldTarget, join(destination, "skill-a"), "dir");
+    await mkdir(join(destination, ".codex", "skills"), { recursive: true });
+    await symlink(oldTarget, join(destination, ".codex", "skills", "skill-a"), "dir");
 
-    const result = await linkMode("dev", [source], root, destination);
+    const result = await linkMode("dev", [source], root, destination, ["codex"]);
 
     assert.equal(result.created[0]?.replaced, true);
-    assert.equal(await realpath(join(destination, "skill-a")), await realpath(source));
+    assert.equal(
+      await realpath(join(destination, ".codex", "skills", "skill-a")),
+      await realpath(source),
+    );
   });
 
   it("silently skips an existing file or directory", async () => {
@@ -72,13 +84,17 @@ describe("linkMode", () => {
     const destination = join(root, "output");
     const { mkdir } = await import("node:fs/promises");
     await mkdir(destination);
-    await writeFile(join(destination, "skill-a"), "keep me\n");
+    await mkdir(join(destination, ".codex", "skills"), { recursive: true });
+    await writeFile(join(destination, ".codex", "skills", "skill-a"), "keep me\n");
 
-    const result = await linkMode("dev", [source], root, destination);
+    const result = await linkMode("dev", [source], root, destination, ["codex"]);
 
     assert.deepEqual(result.created, []);
     assert.deepEqual(result.warnings, []);
-    assert.equal(await readFile(join(destination, "skill-a"), "utf8"), "keep me\n");
+    assert.equal(
+      await readFile(join(destination, ".codex", "skills", "skill-a"), "utf8"),
+      "keep me\n",
+    );
   });
 
   it("rejects duplicate link names within a mode", async () => {
@@ -87,8 +103,29 @@ describe("linkMode", () => {
     const second = await makeSkill(join(root, "two"), "same-name");
 
     await assert.rejects(
-      linkMode("dev", [first, second], root, join(root, "output")),
+      linkMode("dev", [first, second], root, join(root, "output"), ["codex"]),
       (error: unknown) => error instanceof ConfigError && /duplicate link name/.test(error.message),
     );
+  });
+
+  it("creates platform directories when every source is invalid", async () => {
+    const root = await makeWorkspace();
+    const destination = join(root, "output");
+    const { mkdir, stat } = await import("node:fs/promises");
+    await mkdir(destination);
+
+    const result = await linkMode(
+      "dev",
+      [join(root, "missing-skill")],
+      root,
+      destination,
+      ["codex", "claude", "agents"],
+    );
+
+    assert.equal(result.created.length, 0);
+    assert.equal(result.warnings.length, 1);
+    assert.equal((await stat(join(destination, ".codex", "skills"))).isDirectory(), true);
+    assert.equal((await stat(join(destination, ".claude", "skills"))).isDirectory(), true);
+    assert.equal((await stat(join(destination, ".agents", "skills"))).isDirectory(), true);
   });
 });

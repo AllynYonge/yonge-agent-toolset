@@ -1,7 +1,7 @@
 {
   "name": "@yonge/skill-linker",
   "version": "0.1.0",
-  "description": "Link configured SKILL directories into the current working directory.",
+  "description": "Link SKILL directories and write project MCP configs for Agent platforms.",
   "type": "module",
   "bin": {
     "skill-linker": "./dist/src/cli.js"
@@ -9,7 +9,7 @@
   "files": [
     "dist/src",
     "README.md",
-    "skill-linker.config.example.json"
+    "skill-linker.config.example.jsonc"
   ],
   "engines": {
     "node": ">=20"
@@ -19,11 +19,15 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/test/config.test.js dist/test/linker.test.js",
+    "test": "npm run build && node --test dist/test/config.test.js dist/test/linker.test.js dist/test/mcp.test.js dist/test/cli.test.js",
     "prepublishOnly": "npm test"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1",
+    "smol-toml": "^1.8.0"
   }
 }

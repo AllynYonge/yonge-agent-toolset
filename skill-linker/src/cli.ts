@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
+import { basename, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { loadConfig } from "./config.js";
+import { loadConfig, resolveSourcePath } from "./config.js";
 import { linkMode } from "./linker.js";
+import { writeMcpServers } from "./mcp.js";
+import { isPlatform, type Platform } from "./platform.js";
+import type { ModeConfig } from "./types.js";
 
 const HELP = `Usage:
   skill-linker list [--config <path>]
-  skill-linker link <mode> [--config <path>]
+  skill-linker link <mode...> [--platform <codex|claude|agents>] [--config <path>]
 `;
 
 export async function run(
@@ -23,6 +27,7 @@ export async function run(
       args: argv,
       options: {
         config: { type: "string", short: "c" },
+        platform: { type: "string", short: "p", multiple: true },
       },
       allowPositionals: true,
       strict: true,
@@ -30,13 +35,26 @@ export async function run(
     const configPath = typeof parsed.values.config === "string"
       ? parsed.values.config
       : undefined;
+    const platformValues = parsed.values.platform;
+    if (platformValues !== undefined && platformValues.length !== 1) {
+      throw new CliUsageError("link accepts at most one --platform value");
+    }
+    const platformValue = platformValues?.[0];
 
     if (parsed.positionals.length === 0) {
+      if (platformValue !== undefined) {
+        throw new CliUsageError("--platform requires the link command");
+      }
       stdout.write(HELP);
       return 0;
     }
 
     const [command, ...positionals] = parsed.positionals;
+
+    if (command === "list" && platformValue !== undefined) {
+      throw new CliUsageError("list does not accept --platform");
+    }
+
     const loaded = await loadConfig(configPath, cwd);
 
     if (command === "list") {
@@ -49,23 +67,49 @@ export async function run(
     }
 
     if (command === "link") {
-      const mode = positionals[0];
-      if (mode === undefined || positionals.length > 1) {
-        throw new CliUsageError("link requires exactly one mode");
+      if (positionals.length === 0) {
+        throw new CliUsageError("link requires at least one mode");
       }
 
-      const sources = loaded.config.modes[mode];
-      if (sources === undefined) {
-        throw new CliUsageError(`unknown mode: ${mode}`);
+      for (const mode of positionals) {
+        if (!Object.hasOwn(loaded.config.modes, mode)) {
+          throw new CliUsageError(`unknown mode: ${mode}`);
+        }
       }
 
-      const result = await linkMode(mode, sources, loaded.configDirectory, cwd);
-      for (const warning of result.warnings) {
+      if (platformValue !== undefined && !isPlatform(platformValue)) {
+        throw new CliUsageError(
+          `invalid platform "${platformValue}"; expected codex, claude, or agents`,
+        );
+      }
+
+      const platforms: readonly Platform[] = platformValue === undefined
+        ? ["codex", "claude", "agents"]
+        : [platformValue];
+      const modeConfig = mergeModeConfigs(
+        positionals,
+        loaded.config.modes,
+        loaded.configDirectory,
+      );
+      const linkResult = await linkMode(
+        positionals.join(", "),
+        modeConfig.skills,
+        loaded.configDirectory,
+        cwd,
+        platforms,
+      );
+      const mcpResult = await writeMcpServers(modeConfig.mcpServers, cwd, platforms);
+      for (const warning of [...linkResult.warnings, ...mcpResult.warnings]) {
         stderr.write(`${warning}\n`);
       }
-      for (const link of result.created) {
+      for (const link of linkResult.created) {
         const suffix = link.replaced ? " (replaced)" : "";
-        stdout.write(`LINK: ${link.name} -> ${link.target}${suffix}\n`);
+        const destination = relative(cwd, link.destination) || ".";
+        stdout.write(`LINK: ${destination} -> ${link.target}${suffix}\n`);
+      }
+      for (const server of mcpResult.written) {
+        const destination = relative(cwd, server.destination) || ".";
+        stdout.write(`MCP: ${server.name} -> ${destination}\n`);
       }
       return 0;
     }
@@ -78,16 +122,54 @@ export async function run(
   }
 }
 
+function mergeModeConfigs(
+  modeNames: string[],
+  modes: Record<string, ModeConfig>,
+  configDirectory: string,
+): ModeConfig {
+  const skillsByName = new Map<string, string>();
+  const invalidSkills: string[] = [];
+  const mcpServers: Record<string, unknown> = {};
+
+  for (const modeName of modeNames) {
+    const mode = modes[modeName] as ModeConfig;
+    for (const source of mode.skills) {
+      if (source.trim().length === 0) {
+        invalidSkills.push(source);
+        continue;
+      }
+
+      const name = basename(resolveSourcePath(source, configDirectory));
+      skillsByName.delete(name);
+      skillsByName.set(name, source);
+    }
+
+    for (const [name, server] of Object.entries(mode.mcpServers)) {
+      delete mcpServers[name];
+      mcpServers[name] = server;
+    }
+  }
+
+  return {
+    skills: [...skillsByName.values(), ...invalidSkills],
+    mcpServers,
+  };
+}
+
 function writeModeList(
-  modes: Record<string, string[]>,
+  modes: Record<string, ModeConfig>,
   stdout: NodeJS.WritableStream,
 ): void {
   const entries = Object.entries(modes);
   const width = entries.reduce((longest, [mode]) => Math.max(longest, mode.length), 0);
 
-  for (const [mode, sources] of entries) {
-    const noun = sources.length === 1 ? "skill" : "skills";
-    stdout.write(`${mode.padEnd(width)}  ${sources.length} ${noun}\n`);
+  for (const [mode, config] of entries) {
+    const skillNoun = config.skills.length === 1 ? "skill" : "skills";
+    const mcpCount = Object.keys(config.mcpServers).length;
+    const mcpNoun = mcpCount === 1 ? "MCP" : "MCPs";
+    stdout.write(
+      `${mode.padEnd(width)}  ${config.skills.length} ${skillNoun}  ${mcpCount} ${mcpNoun}\n`,
+    );
   }
 }
 

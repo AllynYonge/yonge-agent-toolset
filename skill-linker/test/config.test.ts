@@ -23,11 +23,14 @@ describe("configuration", () => {
     const configPath = join(root, "config", "skill-linker.config.json");
     const { mkdir } = await import("node:fs/promises");
     await mkdir(join(root, "config"), { recursive: true });
-    await writeFile(configPath, JSON.stringify({ modes: { dev: ["../skills/a"] } }));
+    await writeFile(
+      configPath,
+      JSON.stringify({ modes: { dev: { skills: ["../skills/a"] } } }),
+    );
 
     const loaded = await loadConfig(configPath, "/different/current/directory");
 
-    assert.equal(loaded.config.modes.dev?.[0], "../skills/a");
+    assert.equal(loaded.config.modes.dev?.skills[0], "../skills/a");
     assert.equal(resolveSourcePath("../skills/a", loaded.configDirectory), join(root, "skills", "a"));
   });
 
@@ -41,28 +44,78 @@ describe("configuration", () => {
     await mkdir(cwd, { recursive: true });
     await writeFile(
       join(home, ".yonge-skill", "skill-linker.config.json"),
-      JSON.stringify({ modes: { home: [] } }),
+      JSON.stringify({ modes: { home: { skills: [] } } }),
     );
     await writeFile(
       join(cwd, "skill-linker.config.json"),
-      JSON.stringify({ modes: { local: [] } }),
+      JSON.stringify({ modes: { local: { skills: [] } } }),
     );
 
     const loaded = await loadConfig(undefined, cwd, home);
 
     assert.deepEqual(Object.keys(loaded.config.modes), ["home"]);
     assert.deepEqual(resolveConfigPaths(undefined, cwd, home), [
+      join(home, ".yonge-skill", "skill-linker.config.jsonc"),
       join(home, ".yonge-skill", "skill-linker.config.json"),
+      join(cwd, "skill-linker.config.jsonc"),
       join(cwd, "skill-linker.config.json"),
     ]);
+  });
+
+  it("parses JSONC comments and trailing commas", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skill-linker-config-test-"));
+    temporaryDirectories.push(root);
+    const configPath = join(root, "skill-linker.config.jsonc");
+    await writeFile(
+      configPath,
+      [
+        "{",
+        "  // 中文模式注释",
+        '  "modes": {',
+        '    "dev": {',
+        '      "skills": ["../skills/a",],',
+        "    },",
+        "  },",
+        "}",
+      ].join("\n"),
+    );
+
+    const loaded = await loadConfig(configPath);
+
+    assert.deepEqual(loaded.config.modes.dev?.skills, ["../skills/a"]);
   });
 
   it("rejects malformed mode entries", async () => {
     const root = await mkdtemp(join(tmpdir(), "skill-linker-config-test-"));
     temporaryDirectories.push(root);
     const configPath = join(root, "skill-linker.config.json");
-    await writeFile(configPath, JSON.stringify({ modes: { dev: "not-an-array" } }));
+    await writeFile(configPath, JSON.stringify({ modes: { dev: ["old-format"] } }));
 
-    await assert.rejects(loadConfig(configPath), /must be an array of source paths/);
+    await assert.rejects(loadConfig(configPath), /must be an object/);
+  });
+
+  it("loads MCP-only modes and rejects empty mode objects", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skill-linker-config-test-"));
+    temporaryDirectories.push(root);
+    const configPath = join(root, "skill-linker.config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        modes: {
+          research: {
+            mcpServers: {
+              context7: { type: "remote", url: "https://mcp.context7.com/mcp" },
+            },
+          },
+        },
+      }),
+    );
+
+    const loaded = await loadConfig(configPath);
+    assert.deepEqual(loaded.config.modes.research?.skills, []);
+    assert.deepEqual(Object.keys(loaded.config.modes.research?.mcpServers ?? {}), ["context7"]);
+
+    await writeFile(configPath, JSON.stringify({ modes: { empty: {} } }));
+    await assert.rejects(loadConfig(configPath), /must contain "skills" or "mcpServers"/);
   });
 });

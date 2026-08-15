@@ -2,9 +2,11 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, resolve } from "node:path";
 
-import type { LoadedConfig, SkillLinkerConfig } from "./types.js";
+import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 
-const DEFAULT_CONFIG_FILENAME = "skill-linker.config.json";
+import type { LoadedConfig, ModeConfig, SkillLinkerConfig } from "./types.js";
+
+const DEFAULT_CONFIG_FILENAMES = ["skill-linker.config.jsonc", "skill-linker.config.json"] as const;
 
 export class ConfigError extends Error {
   public constructor(message: string) {
@@ -26,7 +28,7 @@ export function expandHome(input: string): string {
 }
 
 export function resolveConfigPath(configPath: string | undefined, cwd: string): string {
-  const candidate = expandHome(configPath ?? DEFAULT_CONFIG_FILENAME);
+  const candidate = expandHome(configPath ?? DEFAULT_CONFIG_FILENAMES[0]);
   return isAbsolute(candidate) ? candidate : resolve(cwd, candidate);
 }
 
@@ -40,8 +42,8 @@ export function resolveConfigPaths(
   }
 
   return [
-    resolve(homeDirectory, ".yonge-skill", DEFAULT_CONFIG_FILENAME),
-    resolve(cwd, DEFAULT_CONFIG_FILENAME),
+    ...DEFAULT_CONFIG_FILENAMES.map((filename) => resolve(homeDirectory, ".yonge-skill", filename)),
+    ...DEFAULT_CONFIG_FILENAMES.map((filename) => resolve(cwd, filename)),
   ];
 }
 
@@ -55,31 +57,61 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function parseConfig(raw: string, configPath: string): SkillLinkerConfig {
-  let parsed: unknown;
+  const errors: ParseError[] = [];
+  const parsed = parse(raw, errors, {
+    allowEmptyContent: false,
+    allowTrailingComma: true,
+    disallowComments: false,
+  }) as unknown;
 
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    throw new ConfigError(`invalid JSON in ${configPath}: ${detail}`);
+  if (errors.length > 0) {
+    const first = errors[0] as ParseError;
+    const beforeError = raw.slice(0, first.offset);
+    const line = beforeError.split(/\r?\n/).length;
+    const lastNewline = Math.max(beforeError.lastIndexOf("\n"), beforeError.lastIndexOf("\r"));
+    const column = first.offset - lastNewline;
+    throw new ConfigError(
+      `invalid JSONC in ${configPath}: ${printParseErrorCode(first.error)} at ${line}:${column}`,
+    );
   }
 
   if (!isRecord(parsed) || !isRecord(parsed.modes)) {
     throw new ConfigError(`configuration ${configPath} must contain a "modes" object`);
   }
 
-  const modes: Record<string, string[]> = {};
+  const modes: Record<string, ModeConfig> = {};
 
-  for (const [mode, entries] of Object.entries(parsed.modes)) {
+  for (const [mode, modeValue] of Object.entries(parsed.modes)) {
     if (mode.length === 0) {
       throw new ConfigError(`configuration ${configPath} contains an empty mode name`);
     }
 
-    if (!Array.isArray(entries) || entries.some((entry) => typeof entry !== "string")) {
-      throw new ConfigError(`mode "${mode}" in ${configPath} must be an array of source paths`);
+    if (!isRecord(modeValue)) {
+      throw new ConfigError(`mode "${mode}" in ${configPath} must be an object`);
     }
 
-    modes[mode] = entries as string[];
+    const hasSkills = Object.hasOwn(modeValue, "skills");
+    const hasMcpServers = Object.hasOwn(modeValue, "mcpServers");
+    if (!hasSkills && !hasMcpServers) {
+      throw new ConfigError(
+        `mode "${mode}" in ${configPath} must contain "skills" or "mcpServers"`,
+      );
+    }
+
+    const skills = modeValue.skills ?? [];
+    if (!Array.isArray(skills) || skills.some((entry) => typeof entry !== "string")) {
+      throw new ConfigError(`mode "${mode}" in ${configPath} has an invalid "skills" array`);
+    }
+
+    const mcpServers = modeValue.mcpServers ?? {};
+    if (!isRecord(mcpServers)) {
+      throw new ConfigError(`mode "${mode}" in ${configPath} has an invalid "mcpServers" object`);
+    }
+
+    modes[mode] = {
+      skills: skills as string[],
+      mcpServers,
+    };
   }
 
   return { modes };
