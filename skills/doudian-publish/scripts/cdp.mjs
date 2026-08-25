@@ -42,6 +42,23 @@ export const ERR_LOG = path.join(DEDICATED_PROFILE, 'chrome-err.log');
 export const WS_CACHE = path.join(DEDICATED_PROFILE, 'devtools-ws.json');
 
 /**
+ * 任意浏览器（含用户日常浏览器）的 wsUrl 缓存目录。
+ *
+ * 为何要与专用 profile 分开：专用 profile 的缓存靠 chrome.pid 做归属校验，
+ * 而日常浏览器不是本脚本启动的、没有 chrome.pid，那套校验对它永远不成立。
+ * 早期版本因此完全不为日常浏览器写缓存 —— 结果 --port 9222 每次都要重新走
+ * HTTP 协商，也就每次都弹「Allow remote debugging?」。
+ *
+ * 这里按端口分文件存放，并用 Browser.getVersion 拿到的浏览器身份做校验，
+ * 不依赖 pid。
+ */
+const WS_CACHE_DIR = path.join(os.homedir(), '.yonge', 'doudian', 'ws-cache');
+
+function portCacheFile(port) {
+  return path.join(WS_CACHE_DIR, `port-${port}.json`);
+}
+
+/**
  * 读缓存的 wsUrl。三重校验全过才算有效：
  *  1) 文件里有 port + wsUrl + pid；
  *  2) pid 还活着；
@@ -73,6 +90,31 @@ function writeWsCache(profile, port, wsUrl, pid) {
   } catch {
     /* 写不下不影响主流程 */
   }
+}
+
+/** 按端口读 wsUrl 缓存（适用于任意浏览器，含日常浏览器） */
+function readPortCache(port) {
+  try {
+    const j = JSON.parse(fs.readFileSync(portCacheFile(port), 'utf-8'));
+    if (j?.wsUrl && j?.port === Number(port)) return j;
+  } catch {
+    /* 没缓存或已损坏 */
+  }
+  return null;
+}
+
+function writePortCache(port, wsUrl) {
+  try {
+    fs.mkdirSync(WS_CACHE_DIR, { recursive: true });
+    fs.writeFileSync(portCacheFile(port),
+      JSON.stringify({ port: Number(port), wsUrl, 写入时间: new Date().toISOString() }, null, 2), 'utf-8');
+  } catch {
+    /* 写不下不影响主流程 */
+  }
+}
+
+function clearPortCache(port) {
+  try { fs.unlinkSync(portCacheFile(port)); } catch { /* ignore */ }
 }
 
 /** 丢掉失效的 wsUrl 缓存（浏览器重启后 uuid 会变） */
@@ -274,6 +316,18 @@ export async function connectBrowser(explicit, { profile = DEDICATED_PROFILE, ca
     clearWsCache(profile);
   }
 
+  // 第 0.5 优先：按端口的 wsUrl 缓存。这条覆盖**日常浏览器**场景——
+  // 它不是本脚本启动的、没有 chrome.pid，走不了上面那套归属校验，
+  // 但同样需要免掉每次的 HTTP 协商（否则每次都弹「Allow remote debugging?」）。
+  for (const p of (explicit ? [Number(explicit)] : DEFAULT_PORTS)) {
+    const pc = readPortCache(p);
+    if (!pc) continue;
+    if (!await isPortListening(p)) { clearPortCache(p); continue; }
+    const ws = await probeWs(pc.wsUrl);
+    if (ws) return { port: p, cdp: new Cdp(ws) };
+    clearPortCache(p);   // uuid 变了（浏览器重启过）
+  }
+
   const candidates = [];
   const active = readActivePorts();
 
@@ -320,6 +374,9 @@ export async function connectBrowser(explicit, { profile = DEDICATED_PROFILE, ca
       if (cacheFor && wsUrl.includes('/devtools/browser/') && fs.existsSync(profile)) {
         writeWsCache(profile, port, wsUrl, cacheFor);
       }
+      // 按端口缓存不做归属判断：它只回答"这个端口上的 wsUrl 是什么"，
+      // 不代表任何 profile 的归属，因此对日常浏览器也安全适用。
+      if (wsUrl.includes('/devtools/browser/')) writePortCache(port, wsUrl);
       return { port, cdp: new Cdp(ws), viaHttp };
     }
   }

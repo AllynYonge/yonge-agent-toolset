@@ -6,18 +6,26 @@
  * 而失效表现是上架跑到一半报「等待超时」。与其拿真账号试错，不如先跑体检。
  *
  * 用法:
- *   node doctor.mjs [--launch] [--port <n>] [--shot doctor.png] [--json]
+ *   node doctor.mjs [--launch | --port <n>] [--shot doctor.png] [--json]
+ *                   [--image <主图路径>] [--deep]
  *
- * 说明：只读页面，不填任何字段、不提交，对账号的动作最小。
- * 受限的是「阶段可见性」——第二步页/规格区/SKU 表要走完前面的流程才存在，
- * 所以默认只体检 step1；带 --deep 会填最少字段进到第二步（仍不提交）。
+ * 分级说明（很重要）：
+ *   空白发布页上，类目区、第二步页、规格区、SKU 表**根本不存在**，
+ *   把它们报成「失效」是误报。所以每条选择器在 selectors.mjs 里标了 `needs`，
+ *   本脚本只对「前置条件已满足」的项判定成败，其余标为「跳过」。
+ *
+ *   不带 --image 时只能验白页可见的那几项。
+ *   带 --image 会真的上传一张主图（这是让类目区出现的唯一办法），
+ *   再配 --deep 会继续进第二步页、切手动规格、建一个临时规格值，
+ *   从而覆盖到 SKU 表。**全程不提交、不保存草稿**，跑完关掉标签页即弃。
  */
 import {
   openPage, connectBrowser, launchDedicated, findExistingDebugPort,
-  browserOpenHint, isLoggedIn,
+  browserOpenHint, isLoggedIn, sleep,
 } from './cdp.mjs';
 import { SEL, candidates } from './selectors.mjs';
 import * as dp from './doudian-page.mjs';
+
 const argv = process.argv.slice(2);
 const opt = {
   launch: argv.includes('--launch'),
@@ -25,6 +33,7 @@ const opt = {
   json: argv.includes('--json'),
   port: argv.includes('--port') ? argv[argv.indexOf('--port') + 1] : undefined,
   shot: argv.includes('--shot') ? argv[argv.indexOf('--shot') + 1] : undefined,
+  image: argv.includes('--image') ? argv[argv.indexOf('--image') + 1] : undefined,
 };
 
 async function connect() {
@@ -63,6 +72,7 @@ async function probe(page, key) {
     key,
     note: SEL[key].note,
     stage: SEL[key].stage,
+    needs: SEL[key].needs ?? null,
     ok: !!hit,
     // 命中的是不是首选（hash）；命中 alt 说明哈希已变，该更新常量表了
     viaFallback: !!hit && hit.sel !== list[0],
@@ -89,39 +99,98 @@ async function main() {
 
   const page = await dp.openCreatePage((u) => openPage(u, { conn }));
 
+  // 已满足的前置条件集合。白页什么都没有。
+  const met = new Set();
+  const steps = [];
+
+  try {
+    if (opt.image) {
+      steps.push('上传主图');
+      await dp.uploadFirstImage(page, opt.image);
+      await sleep(4000);
+      met.add('image');
+
+      // 类目区要等标题填完、平台跑完 AI 识别才出现；
+      // 「最近创建」快捷项还要再点开「手动选择类目」弹层才存在。
+      steps.push('填标题');
+      await dp.fillTitle(page, '体检用标题聚酯纤维时尚套装女两件套通勤百搭');
+      await sleep(5000);
+      const opened = await page.eval(`
+        const s = [...document.querySelectorAll('span')]
+          .find(e => e.children.length === 0 && e.innerText.trim() === '手动选择类目');
+        if (s) s.click();
+        return !!s;
+      `);
+      if (opened) {
+        steps.push('开类目弹层');
+        await sleep(3500);
+        met.add('category');
+      }
+
+      if (opt.deep) {
+        // 关掉类目弹层再往下走，否则它会挡住「下一步」
+        await page.eval(`
+          const b = [...document.querySelectorAll('button')]
+            .find(x => x.offsetParent && /^(取消|关闭)$/.test(x.innerText.trim()));
+          if (b) b.click();
+          return !!b;
+        `).catch(() => {});
+        await sleep(1500);
+
+        steps.push('进第二步');
+        await dp.gotoStepTwo(page);
+        await sleep(2000);
+        met.add('step2');
+
+        steps.push('切手动规格');
+        await dp.switchToManualSpec(page);
+        await sleep(1500);
+        met.add('manual');
+
+        steps.push('建临时规格值');
+        await dp.addSpecValue(page, '上衣');
+        await dp.setSizes(page, ['S', 'M']);
+        await sleep(2000);
+        met.add('sku');
+      }
+    }
+  } catch (e) {
+    console.error(`⚠ 推进页面状态时出错（已完成: ${steps.join(' → ') || '无'}）: ${e.message}`);
+    console.error('  后续依赖该状态的项会被标为「跳过」。\n');
+  }
+
   const results = [];
-  const stages = opt.deep ? ['step1', 'step2', 'spec', 'sku'] : ['step1'];
-
   for (const key of Object.keys(SEL)) {
-    if (!stages.includes(SEL[key].stage)) continue;
-    results.push(await probe(page, key));
+    const needs = SEL[key].needs;
+    const r = await probe(page, key);
+    r.skipped = !!needs && !met.has(needs);
+    results.push(r);
   }
 
-  // 文案锚点也查一下，它们比类名稳，是 fallback 的基础
-  const bodyText = await page.text();
-  const textChecks = [
-    ['标题区文案', /商品标题|上传主图|主图/.test(bodyText)],
-    ['类目区文案', /类目|最近创建/.test(bodyText)],
-  ];
+  if (opt.shot) await page.screenshot(opt.shot).catch(() => {});
 
-  if (opt.shot) {
-    await page.screenshot(opt.shot).catch(() => {});
-  }
-
-  const broken = results.filter((r) => !r.ok);
-  const stale = results.filter((r) => r.viaFallback);
+  const checked = results.filter((r) => !r.skipped);
+  const skipped = results.filter((r) => r.skipped);
+  const broken = checked.filter((r) => !r.ok);
+  const stale = checked.filter((r) => r.viaFallback);
 
   if (opt.json) {
     console.log(JSON.stringify({
       时间: new Date().toISOString(),
-      阶段: stages,
+      已满足前置: [...met],
+      推进步骤: steps,
       失效: broken.map((b) => b.key),
       哈希已变: stale.map((s) => ({ key: s.key, 命中: s.hitSel })),
+      跳过: skipped.map((s) => ({ key: s.key, 需要: s.needs })),
       明细: results,
     }, null, 2));
   } else {
-    console.log(`选择器体检（阶段: ${stages.join(' / ')}）\n`);
+    console.log(`选择器体检${steps.length ? `（已推进: ${steps.join(' → ')}）` : '（白页，仅验基础项）'}\n`);
     for (const r of results) {
+      if (r.skipped) {
+        console.log(`- ${r.key.padEnd(22)} 跳过（需要「${r.needs}」状态）`);
+        continue;
+      }
       const mark = !r.ok ? '✗' : r.viaFallback ? '·' : '✓';
       const tail = !r.ok
         ? '全部候选均未命中'
@@ -129,29 +198,32 @@ async function main() {
           ? `命中兜底 ${r.hitSel}（哈希已变，请更新 selectors.mjs）`
           : `${r.count} 个`;
       console.log(`${mark} ${r.key.padEnd(22)} ${tail}`);
-      if (!r.ok) {
-        for (const t of r.tried) console.log(`    tried: ${t.sel}`);
-      }
+      if (!r.ok) for (const t of r.tried) console.log(`    tried: ${t.sel}`);
       if (r.note && (!r.ok || r.viaFallback)) console.log(`    用途: ${r.note}`);
     }
+
     console.log('');
-    for (const [name, ok] of textChecks) {
-      console.log(`${ok ? '✓' : '✗'} 文案锚点 ${name}`);
+    console.log(`已验 ${checked.length} 项：命中 ${checked.length - broken.length}`
+      + (stale.length ? `（其中 ${stale.length} 条走兜底）` : '')
+      + (broken.length ? `，失效 ${broken.length}` : ''));
+    if (skipped.length) {
+      console.log(`跳过 ${skipped.length} 项：前置条件未满足`);
+      const needImage = skipped.filter((s) => s.needs === 'image').length;
+      if (needImage && !opt.image) {
+        console.log('  → 加 --image <主图路径> 可验类目区等依赖主图的项');
+      }
+      if (!opt.deep) {
+        console.log('  → 加 --image <主图> --deep 可验第二步页/规格区/SKU 表');
+      }
     }
-    console.log('');
-    console.log(`命中 ${results.length - broken.length} / ${results.length}`
-      + (stale.length ? `，其中 ${stale.length} 条走了兜底` : ''));
     if (broken.length) {
       console.log('');
-      console.log('有选择器失效，先去真实页面上确认新的类名，再更新 scripts/selectors.mjs。');
+      console.log('有选择器确实失效，去真实页面上确认新类名，再更新 scripts/selectors.mjs。');
       console.log('改之前读 references/dom-notes.md —— 那里记着每处的交互序列约束。');
     }
-    if (!opt.deep) {
-      console.log('');
-      console.log('提示：第二步页/规格区/SKU 表需要走完前置流程才存在，本次未体检。');
-      console.log('      想连它们一起查，加 --deep（会填最少字段进第二步，仍不提交）。');
-    }
     if (opt.shot) console.log(`截图: ${opt.shot}`);
+    console.log('');
+    console.log('本次未提交、未保存草稿。标签页已关闭。');
   }
 
   await page.close().catch(() => {});

@@ -12,9 +12,21 @@
  *   alt   —— 语义化兜底选择器数组（按结构/属性定位，抗改版）
  *   text  —— 用于兜底的可见文案（正则源串），配合 byText 使用
  *   note  —— 这个选择器指向什么，doctor 输出时会打印
+ *   needs —— 需要什么页面状态才存在。空表示白页就在。
+ *            doctor 靠这个区分「真失效」和「本次条件不具备」，
+ *            否则会把空白发布页上本就不存在的元素误报成选择器坏了。
  *
  * 改动前先读 references/dom-notes.md，那里记着每处的交互序列约束。
  */
+
+/** needs 的取值含义 */
+export const NEEDS = {
+  IMAGE: 'image',       // 需先上传主图
+  CATEGORY: 'category', // 需先填标题（等 AI 识别）+ 点「手动选择类目」开弹层
+  STEP2: 'step2',       // 需先点「下一步」进详情表单
+  MANUAL: 'manual',     // 需先从「智能填写助手」切到手动填写
+  SKU: 'sku',           // 需先建好规格值，SKU 表才会生成
+};
 
 /** 语义化优先级：先试 hash，命中不了再逐个试 alt */
 export const SEL = {
@@ -36,6 +48,7 @@ export const SEL = {
     alt: ['div[class*=batchImageUpload] img'],
     note: '已上传主图计数用的 img',
     stage: 'step1',
+    needs: 'image',
   },
   titleInput: {
     hash: 'input.ecom-g-input',
@@ -46,8 +59,16 @@ export const SEL = {
   categoryHistory: {
     hash: '.style_searchHistoryItems__FdSkW',
     alt: ['div[class*=searchHistoryItems]'],
-    note: '类目「最近创建」快捷项',
+    note: '类目「最近创建」快捷项（需先点「手动选择类目」开弹层）',
     stage: 'step1',
+    needs: 'category',
+  },
+  categorySelector: {
+    hash: '[class*=categorySelectorV2]',
+    alt: ['[class*=allCategory]', '[class*=categoryGroupTitle]'],
+    note: '类目选择器弹层容器',
+    stage: 'step1',
+    needs: 'category',
   },
   categoryConfirm: {
     hash: 'button.ecom-g-btn-primary',
@@ -62,12 +83,14 @@ export const SEL = {
     alt: ['[class*=composition-select]'],
     note: '面料材质选择器（材质+含量两段式）',
     stage: 'step2',
+    needs: 'step2',
   },
   detailImageInput: {
     hash: '.styles_decorateImgEditTitleWrapper__wfpvu input[type=file]',
     alt: ['div[class*=decorateImgEdit] input[type=file]'],
     note: '详情图上传 input',
     stage: 'step2',
+    needs: 'step2',
   },
 
   // ---------- 规格设置 ----------
@@ -76,48 +99,56 @@ export const SEL = {
     alt: ['button[class*=switchButton]'],
     note: '从「智能填写助手」切到手动填写的按钮',
     stage: 'spec',
+    needs: 'step2',
   },
   specForCreate: {
     hash: '.style_forCreate__c19CW',
     alt: ['div[class*=forCreate]'],
     note: '追加新规格值的空位容器（点已有值的 picker 会覆盖，别用错）',
     stage: 'spec',
+    needs: 'manual',
   },
   specForCreatePicker: {
     hash: '.style_forCreate__c19CW .ecom-g-cascader-picker',
     alt: ['div[class*=forCreate] .ecom-g-cascader-picker'],
     note: '追加位的 cascader picker',
     stage: 'spec',
+    needs: 'manual',
   },
   specForCreateInput: {
     hash: '.style_forCreate__c19CW input.ecom-g-cascader-input',
     alt: ['div[class*=forCreate] input.ecom-g-cascader-input'],
     note: '追加位的搜索输入框',
     stage: 'spec',
+    needs: 'manual',
   },
   specNameInput: {
     hash: 'input.styles_skuNameInput__eV89r',
     alt: ['input[class*=skuNameInput]'],
     note: '自定义规格值的最终名称输入框',
     stage: 'spec',
+    needs: 'sku',
   },
   specValueBox: {
     hash: '.style_specValueBox__i8sD6',
     alt: ['div[class*=specValueBox]'],
     note: '规格值区容器（第一个=颜色分类，最后一个=尺码）',
     stage: 'spec',
+    needs: 'manual',
   },
   specValueRow: {
     hash: '.style_skuValue__QyAOk',
     alt: ['div[class*=skuValue]'],
     note: '单个规格值行（含 picker、备注框、规格图上传位）',
     stage: 'spec',
+    needs: 'sku',
   },
   specConfirmCheck: {
     hash: '[data-kora=确认]',
     alt: [],
     note: '绿色 ✓，把新值加入候选并自动勾选',
     stage: 'spec',
+    needs: 'sku',
   },
 
   // ---------- SKU 表 ----------
@@ -126,18 +157,21 @@ export const SEL = {
     alt: ['div[class*=customVirtualTable]'],
     note: 'SKU 价格库存表（窗口化虚拟表）',
     stage: 'sku',
+    needs: 'sku',
   },
   skuScrollHolder: {
     hash: '.ecom-g-table-tbody-virtual-holder',
     alt: [],
     note: '虚拟表滚动容器（必须滚它自己，不是 window）',
     stage: 'sku',
+    needs: 'sku',
   },
   skuScrollInner: {
     hash: '.ecom-g-table-tbody-virtual-holder-inner',
     alt: [],
     note: '虚拟表内层，translateY 用于算行全局下标',
     stage: 'sku',
+    needs: 'sku',
   },
 };
 

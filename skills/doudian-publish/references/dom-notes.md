@@ -290,9 +290,35 @@ Chrome 136 起，对 DevTools **HTTP** 终结点（`/json/version`）的请求�
    拿 wsUrl」这条路**在当前版本上基本空跑**。
 2. **隔离 profile 上 HTTP 也不弹框。** 弹框主要发生在日常 profile 上。
 
-因此实际做法是**自己缓存 wsUrl**：首次不得不走 HTTP 拿到带 uuid 的地址后，
-写进 `<profile>/devtools-ws.json`，之后每次连接直读缓存、零 HTTP 请求。
-实测复用时 3-25ms、`fetch` 调用数为 0。
+因此实际做法是**自己缓存 wsUrl**：首次不得不走 HTTP 拿到带 uuid 的地址后写进缓存，
+之后每次连接直读缓存、零 HTTP 请求。实测复用时 3-25ms、`fetch` 调用数为 0。
+
+缓存分两套，**都需要**：
+
+| 缓存 | 位置 | 归属校验 | 适用 |
+|------|------|---------|------|
+| profile 缓存 | `<profile>/devtools-ws.json` | pid 三重校验 | 本脚本启动的专用实例 |
+| 端口缓存 | `~/.yonge/doudian/ws-cache/port-<n>.json` | 无（只回答"该端口上 wsUrl 是什么"） | 任意浏览器，含用户日常浏览器 |
+
+端口缓存是补出来的：日常浏览器不是本脚本启动的、没有 `chrome.pid`，
+profile 缓存那套 pid 校验对它永远不成立，于是早期版本**完全不为它写缓存** ——
+结果 `--port 9222` 每次都要重新走 HTTP 协商，也就每次都弹确认框。
+端口缓存不做归属判断，所以对日常浏览器也安全适用；uuid 失效时自动清理重建。
+
+### 弹框已经出现时会发生什么
+
+确认框是 macOS 原生 sheet，会**阻塞该端口上所有 HTTP 请求**（`/json/version`
+返回空）。实测它挂着时脚本连不上，且没人点就一直挂着。
+用 AppleScript 可以查到并点掉（层级较深，`entire contents` 遍历不到）：
+
+```
+sheet 1 of window 1 → group 1 → group 1 → group 1 → group 2 → group 1
+  → AXButton desc 分别为 "Turn off in settings" / "Cancel" / "Allow"
+```
+
+判断有没有挂着：
+`osascript -e 'tell application "System Events" to tell process "Google Chrome" to get count of sheets of every window'`
+返回非 0 就是有弹框在等。
 
 ### 缓存必须带 pid 校验（踩过的坑）
 
@@ -309,6 +335,9 @@ pid 存在 → pid 还活着 → 与该 profile 的 `chrome.pid` 一致。
 
 部分 Chrome 的 HTTP `/json/*` 会返回 404（被扩展或安全策略拦了），
 只有 WebSocket 端点可用，所以不能只靠 HTTP 判断端口可用性。
+**本机日常 Chrome 就是这种情况**：点掉确认框之后 `/json/version` 稳定返回 404，
+连接完全靠 WS 直连回落（实测 3.9s 连上并重建端口缓存）。
+这也是为什么端口缓存对日常浏览器格外重要 —— 它那条 HTTP 路本来就是坏的。
 
 裸 `/devtools/browser`（不带 uuid）只在没人占用时偶尔能连，不可依赖。
 
