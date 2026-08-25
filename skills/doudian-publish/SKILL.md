@@ -73,6 +73,14 @@ profile 放在 `~/.yonge/doudian/chrome-profile`，端口动态分配。
 
 后续所有命令加 `--launch` 就会复用这个实例（幂等，不会重复开）。
 
+**关于「Allow remote debugging?」确认框**：Chrome 136+ 在收到 DevTools HTTP
+请求时会弹这个框。脚本会把首次拿到的 WebSocket 地址缓存进
+`<profile>/devtools-ws.json`，之后每次连接直读缓存、不再碰 HTTP 端点，
+所以最多只在首次遇到一次。实测隔离 profile 上一次都没弹过；
+用日常浏览器（`--port`）时更容易遇到，点一次 Allow 即可。
+
+缓存带 pid 校验：浏览器重启或换实例后会自动失效重建，不会连错浏览器。
+
 **备选：用日常浏览器**
 
 ```bash
@@ -253,6 +261,8 @@ node {baseDir}/scripts/publish.mjs --plan <货盘.xlsx> [选项]
 | `以下 SKU 行未填写` | 虚拟表滚动步长没覆盖到全部行，看报错里列出的规格-尺码 |
 | 大量 `等待超时` / 选择器找不到 | 抖店可能改版了。跑 `node {baseDir}/scripts/doctor.mjs --launch` 体检，命中兜底或失效的项去更新 `scripts/selectors.mjs` |
 | 专用浏览器起不来 | 看 `~/.yonge/doudian/chrome-profile/chrome-err.log` |
+| 反复弹「Allow remote debugging?」 | 用 `--launch`（隔离 profile 实测不弹）。若坚持用 `--port` 连日常浏览器，点一次 Allow 后地址会被缓存 |
+| 怀疑连错了浏览器 | 看 `<profile>/devtools-ws.json` 里的 `pid`/`port` 是否与 `chrome.pid` 一致；不一致会被自动拒绝 |
 
 失败时脚本会**保留标签页**（不自动关），方便在浏览器里直接看现场。
 调试完手动关掉即可。配合 `--shots` 还会存一张错误截图。

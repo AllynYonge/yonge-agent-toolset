@@ -267,12 +267,50 @@ dropdown 的 class 里带 `auto-dropdown-id-运费模板`。
 
 ## 浏览器调试端点
 
-本机 Chrome 的 HTTP `/json/*` 全部返回 404（被扩展或安全策略拦了），
-只有 WebSocket 端点可用。所以 `connectBrowser` 先试 HTTP，失败退回
-WebSocket 直连探测 —— 只用 HTTP 判断会漏掉可用端口。
+### 「Allow remote debugging?」确认框（Chrome 136+）
 
-WebSocket 路径优先从 `DevToolsActivePort` 文件第二行读（带 UUID），
-退回裸 `/devtools/browser`。
+Chrome 136 起，对 DevTools **HTTP** 终结点（`/json/version`）的请求会弹一个
+原生确认框「An external app wants full control over this Chrome session」。
+**拿着完整 `ws://.../devtools/browser/<uuid>` 地址直连 WebSocket 不走这条检测。**
+
+本机实测（Chrome 151.0.7922，macOS）：
+
+| 连接方式 | 目标 | 结果 |
+|---------|------|------|
+| WS 直连 | 隔离 profile | 27ms / 28ms，无弹框 |
+| WS 直连 | 日常 profile（已授权过） | 首次 8s+ 超时，之后 4.4s → 1.6s |
+| HTTP `/json/version` | 隔离 profile | 正常返回，无弹框 |
+
+两个反直觉的结论：
+
+1. **`DevToolsActivePort` 文件在 Chrome 151/macOS 上根本不写。** 用
+   `--user-data-dir` + `--remote-debugging-port` 起一个干净实例，等 20s
+   该文件始终不出现，但 HTTP 端点和 WS 都正常。日常 profile 里那个文件是
+   旧版本留下的残留（内容里的端口早已失效）。所以「读 DevToolsActivePort
+   拿 wsUrl」这条路**在当前版本上基本空跑**。
+2. **隔离 profile 上 HTTP 也不弹框。** 弹框主要发生在日常 profile 上。
+
+因此实际做法是**自己缓存 wsUrl**：首次不得不走 HTTP 拿到带 uuid 的地址后，
+写进 `<profile>/devtools-ws.json`，之后每次连接直读缓存、零 HTTP 请求。
+实测复用时 3-25ms、`fetch` 调用数为 0。
+
+### 缓存必须带 pid 校验（踩过的坑）
+
+`devtools-ws.json` 里除了 `port`/`wsUrl` 还必须存 `pid`，读取时三重校验：
+pid 存在 → pid 还活着 → 与该 profile 的 `chrome.pid` 一致。
+
+原因是个真实事故：专用实例被 kill 后，`connectBrowser` 的自动探测回落到
+9222 连上了**用户的日常浏览器**，若把那个终结点写进专用 profile 的缓存，
+下一次就会静默地去驾驭日常浏览器 —— 隔离形同虚设。
+所以 `connectBrowser` 的 `cacheFor` 参数只在调用方能确认「连的就是该 profile
+自己的实例」时才传 pid；自动探测路径一律不传、不写缓存。
+
+### 其他既有约束
+
+部分 Chrome 的 HTTP `/json/*` 会返回 404（被扩展或安全策略拦了），
+只有 WebSocket 端点可用，所以不能只靠 HTTP 判断端口可用性。
+
+裸 `/devtools/browser`（不带 uuid）只在没人占用时偶尔能连，不可依赖。
 
 `/devtools/browser`（裸路径）**只允许一个客户端**。web-access 的
 `cdp-proxy.mjs` 是常驻进程会占着它，冲突时先 `pkill -f cdp-proxy.mjs`。

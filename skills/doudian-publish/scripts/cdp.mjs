@@ -27,6 +27,60 @@ export const OUT_LOG = path.join(DEDICATED_PROFILE, 'chrome-out.log');
 export const ERR_LOG = path.join(DEDICATED_PROFILE, 'chrome-err.log');
 
 /**
+ * 缓存的 browser 级 WebSocket 终结点。
+ *
+ * 为何需要自己存：Chrome 136+ 引入了「Allow remote debugging?」确认框，
+ * 而触发它的是对 DevTools **HTTP** 终结点（/json/version）的请求；
+ * 拿着完整 ws:// 地址直连 WebSocket 不走那条检测。
+ *
+ * 按常规应该从 profile 目录的 DevToolsActivePort 读这个地址，但实测
+ * Chrome 151（macOS）**并不写这个文件**（无论是否 --headless，等 20s 仍无），
+ * 而日常 profile 里那个文件是旧版本留下的残留。
+ * 所以改成：首次不得不走 HTTP 拿到 wsUrl 后，自己写进 profile 目录缓存，
+ * 之后的每次连接都直读缓存、跳过 HTTP。
+ */
+export const WS_CACHE = path.join(DEDICATED_PROFILE, 'devtools-ws.json');
+
+/**
+ * 读缓存的 wsUrl。三重校验全过才算有效：
+ *  1) 文件里有 port + wsUrl + pid；
+ *  2) pid 还活着；
+ *  3) 和该 profile 当前的 chrome.pid 对得上。
+ *
+ * 第 2/3 条是必需的：实测过一个真实事故——专用实例被杀后，自动探测回落到
+ * 9222 连上了**日常浏览器**，如果那时把日常浏览器的终结点写进专用 profile
+ * 的缓存，下一次就会静默地去驾驭用户的日常浏览器。隔离必须硬保证。
+ */
+function readWsCache(profile = DEDICATED_PROFILE) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(profile, 'devtools-ws.json'), 'utf-8'));
+    if (!j?.wsUrl || !j?.port || !j?.pid) return null;
+    try { process.kill(j.pid, 0); } catch { return null; }   // pid 已死
+    const rec = readDedicatedPid(profile);
+    if (!rec || rec.pid !== j.pid) return null;               // 不是当前那个实例
+    return j;
+  } catch {
+    /* 没缓存或已损坏 */
+  }
+  return null;
+}
+
+function writeWsCache(profile, port, wsUrl, pid) {
+  if (!pid) return;
+  try {
+    fs.writeFileSync(path.join(profile, 'devtools-ws.json'),
+      JSON.stringify({ port, wsUrl, pid, 写入时间: new Date().toISOString() }, null, 2), 'utf-8');
+  } catch {
+    /* 写不下不影响主流程 */
+  }
+}
+
+/** 丢掉失效的 wsUrl 缓存（浏览器重启后 uuid 会变） */
+function clearWsCache(profile = DEDICATED_PROFILE) {
+  try { fs.unlinkSync(path.join(profile, 'devtools-ws.json')); } catch { /* ignore */ }
+}
+
+/**
  * 端口策略：默认动态分配空闲端口，避免固定端口被占时白等超时。
  * 想钉死端口就设 DOUDIAN_DEBUG_PORT。
  */
@@ -191,17 +245,35 @@ export async function findExistingDebugPort(profile = DEDICATED_PROFILE) {
 /**
  * 连上浏览器，返回 { port, cdp }。
  *
- * 三个必须尊重的事实（都是踩过的坑）：
- *  1. 部分 Chrome 对 /json/version 返回 404（安全策略/版本差异），
+ * 四个必须尊重的事实（都是踩过的坑）：
+ *  1. Chrome 136+ 对 DevTools **HTTP** 终结点的请求会弹「Allow remote debugging?」
+ *     确认框（实测日常 profile 上首次连接被阻塞 >8s，点了 Allow 后才通）。
+ *     拿着完整 ws:// 地址直连 WebSocket 不走这条检测，所以优先用缓存的 wsUrl。
+ *  2. 部分 Chrome 对 /json/version 返回 404（安全策略/扩展干扰），
  *     所以不能只靠 HTTP 判断端口可用性。
- *  2. browser 级终结点的真实路径带 uuid（/devtools/browser/<uuid>），
- *     它写在 profile 目录的 DevToolsActivePort 里。裸 /devtools/browser
- *     只在没人占用时偺尔能连，不可依赖。
- *  3. 该终结点只允许一个客户端。探测成功的连接必须直接复用，
+ *  3. browser 级终结点的真实路径带 uuid（/devtools/browser/<uuid>），
+ *     重启浏览器后会变。裸 /devtools/browser 只在没人占用时偶尔能连，不可依赖。
+ *  4. 该终结点只允许一个客户端。探测成功的连接必须直接复用，
  *     且整个批量任务期间只建一次。web-access 的 cdp-proxy 占着时
  *     本脚本连不上，需先 pkill -f cdp-proxy.mjs。
+ *
+ * @param explicit 指定端口；不给则自动探测
+ * @param profile  用于读/写 wsUrl 缓存的 profile 目录
+ * @param cacheFor 仅当确知连的就是该 profile 的实例时传 pid，才会写缓存。
+ *                 自动探测路径不传，因为它可能回落到用户日常浏览器。
  */
-export async function connectBrowser(explicit) {
+export async function connectBrowser(explicit, { profile = DEDICATED_PROFILE, cacheFor = null } = {}) {
+  // 第 0 优先：缓存的 wsUrl 直连，完全不碰 HTTP 终结点 → 不触发确认框。
+  const cached = readWsCache(profile);
+  if (cached && (!explicit || cached.port === Number(explicit))) {
+    if (await isPortListening(cached.port)) {
+      const ws = await probeWs(cached.wsUrl);
+      if (ws) return { port: cached.port, cdp: new Cdp(ws) };
+    }
+    // 端口没人监听或 uuid 已变（浏览器重启过），丢掉重建
+    clearWsCache(profile);
+  }
+
   const candidates = [];
   const active = readActivePorts();
 
@@ -211,33 +283,45 @@ export async function connectBrowser(explicit) {
     ? [Number(explicit)]
     : [...new Set([...active.map((a) => a.port), ...DEFAULT_PORTS])];
 
-  // 优先 HTTP：拿到的 wsUrl 带唯一 id，最可靠
+  // 先试 DevToolsActivePort 里的 uuid 路径（也是 WS 直连，不弹框）。
+  // 注意：实测 Chrome 151/macOS 不写这个文件，这条路径大多数时候空跑，
+  // 但旧版本/其他平台仍会写，留着作为免弹框的第二条路。
+  for (const { port, wsPath } of active) {
+    if (explicit && port !== Number(explicit)) continue;
+    if (wsPath) candidates.push({ port, wsUrl: `ws://127.0.0.1:${port}${wsPath}`, viaHttp: false });
+  }
+
+  // 再试 HTTP：拿到的 wsUrl 带唯一 id，最可靠，但可能弹确认框。
   for (const p of ports) {
     try {
       const v = await httpJson(`http://127.0.0.1:${p}/json/version`);
-      if (v?.webSocketDebuggerUrl) candidates.push({ port: p, wsUrl: v.webSocketDebuggerUrl });
+      if (v?.webSocketDebuggerUrl) {
+        candidates.push({ port: p, wsUrl: v.webSocketDebuggerUrl, viaHttp: true });
+      }
     } catch {
       /* 落到下面的方式 */
     }
   }
 
-  // 再试 DevToolsActivePort 里的 uuid 路径
-  for (const { port, wsPath } of active) {
-    if (explicit && port !== Number(explicit)) continue;
-    if (wsPath) candidates.push({ port, wsUrl: `ws://127.0.0.1:${port}${wsPath}` });
-  }
-
   // 最后试裸路径
   for (const p of ports) {
-    candidates.push({ port: p, wsUrl: `ws://127.0.0.1:${p}/devtools/browser` });
+    candidates.push({ port: p, wsUrl: `ws://127.0.0.1:${p}/devtools/browser`, viaHttp: false });
   }
 
   const seen = new Set();
-  for (const { port, wsUrl } of candidates) {
+  for (const { port, wsUrl, viaHttp } of candidates) {
     if (seen.has(wsUrl)) continue;
     seen.add(wsUrl);
     const ws = await probeWs(wsUrl);
-    if (ws) return { port, cdp: new Cdp(ws) };
+    if (ws) {
+      // 拿到带 uuid 的完整地址且调用方确认了归属，才缓存。
+      // 这是“首次可能弹一次，之后不再弹”的关键，
+      // 也是不把日常浏览器误写进专用缓存的关键。
+      if (cacheFor && wsUrl.includes('/devtools/browser/') && fs.existsSync(profile)) {
+        writeWsCache(profile, port, wsUrl, cacheFor);
+      }
+      return { port, cdp: new Cdp(ws), viaHttp };
+    }
   }
   return null;
 }
@@ -256,14 +340,16 @@ export async function launchDedicated({ profile = DEDICATED_PROFILE, port, url =
   // 1) 显式指定端口（或 env 钉死）时先试那个端口
   const want = port ?? fixedPortFromEnv();
   if (want) {
-    const hit = await connectBrowser(want);
+    const rec = readDedicatedPid(profile);
+    const hit = await connectBrowser(want, { profile, cacheFor: rec?.alive ? rec.pid : null });
     if (hit) return { port: want, cdp: hit.cdp, launched: false, profile };
   }
 
   // 2) 再看该 profile 是不是已经在跑（端口可能是上次动态分配的）
   const running = await findExistingDebugPort(profile);
   if (running) {
-    const hit = await connectBrowser(running);
+    const rec = readDedicatedPid(profile);
+    const hit = await connectBrowser(running, { profile, cacheFor: rec?.alive ? rec.pid : null });
     if (hit) return { port: running, cdp: hit.cdp, launched: false, profile };
   }
 
@@ -295,10 +381,16 @@ export async function launchDedicated({ profile = DEDICATED_PROFILE, port, url =
     /* 写不下不影响主流程 */
   }
 
+  // 新启的实例肯定没缓存（或缓存已失效），先清掉，避免拿着上一个实例的
+  // uuid 去白试一轮。connectBrowser 会在首次拿到 wsUrl 后重建缓存。
+  clearWsCache(profile);
+
   const start = Date.now();
   while (Date.now() - start < 40000) {
     await sleep(1000);
-    const conn = await connectBrowser(usePort);
+    // cacheFor 传刚 spawn 出来的 pid：这里肯定是该 profile 自己的实例，
+    // 可以安全地把 wsUrl 写进缓存，后续连接就能跳过 HTTP、不再弹确认框。
+    const conn = await connectBrowser(usePort, { profile, cacheFor: child.pid });
     if (conn) return { port: usePort, cdp: conn.cdp, launched: true, profile };
   }
   throw new Error(

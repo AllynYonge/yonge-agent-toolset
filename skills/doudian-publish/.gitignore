@@ -6,3 +6,4 @@ shots/
 report*.json
 chrome.pid
 chrome-*.log
+devtools-ws.json

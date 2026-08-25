@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { SEL, SKU_CELL, TEXT, candidates, queryExpr } from './selectors.mjs';
+import { WS_CACHE as cdpWsCache, DEDICATED_PROFILE as cdpProfile } from './cdp.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let pass = 0;
@@ -151,6 +152,61 @@ const jitter = (b, r = 0.4) => Math.round(b * (1 + (Math.random() * 2 - 1) * r))
 const js = Array.from({ length: 500 }, () => jitter(2500));
 ok('jitter 落在 ±40% 区间', js.every((v) => v >= 1500 && v <= 3500));
 ok('jitter 具备随机性', new Set(js).size > 100);
+
+/* ---------- wsUrl 缓存（免「Allow remote debugging?」确认框） ---------- */
+group('wsUrl 缓存与隔离');
+
+// 不启浏览器，只验缓存文件的校验语义（这是隔离的关键）。
+// 真实事故：专用实例被杀后，自动探测回落到 9222 连上了日常浏览器，
+// 若把那个终结点写进专用 profile 缓存，下次就会静默驾驭用户的日常浏览器。
+const wsProf = fs.mkdtempSync(path.join(os.tmpdir(), 'doudian-ws-'));
+const wsFile = path.join(wsProf, 'devtools-ws.json');
+const pidFile = path.join(wsProf, 'chrome.pid');
+
+// 用当前进程的 pid 充当“活着的实例”
+const livePid = process.pid;
+const deadPid = 999999;   // 几乎不可能存在
+
+function fakeCache(obj) { fs.writeFileSync(wsFile, JSON.stringify(obj), 'utf-8'); }
+function fakePidFile(pid, port) { fs.writeFileSync(pidFile, `${pid}\n${port}\n`, 'utf-8'); }
+
+// 复刻 readWsCache 的校验逻辑（cdp.mjs 里是模块私有函数）
+function validateCache(profile) {
+  try {
+    const j = JSON.parse(fs.readFileSync(path.join(profile, 'devtools-ws.json'), 'utf-8'));
+    if (!j?.wsUrl || !j?.port || !j?.pid) return null;
+    try { process.kill(j.pid, 0); } catch { return null; }
+    const [pidLine] = fs.readFileSync(path.join(profile, 'chrome.pid'), 'utf-8').split('\n');
+    if (Number.parseInt(pidLine.trim(), 10) !== j.pid) return null;
+    return j;
+  } catch { return null; }
+}
+
+fakeCache({ port: 1234, wsUrl: 'ws://127.0.0.1:1234/devtools/browser/abc', pid: livePid });
+fakePidFile(livePid, 1234);
+ok('pid 活着且与 chrome.pid 一致 → 缓存有效', validateCache(wsProf) !== null);
+
+fakeCache({ port: 1234, wsUrl: 'ws://127.0.0.1:1234/devtools/browser/abc', pid: deadPid });
+fakePidFile(deadPid, 1234);
+ok('pid 已死 → 缓存失效', validateCache(wsProf) === null);
+
+// 关键隔离用例：缓存指向日常浏览器（9222），但 chrome.pid 是别的实例
+fakeCache({ port: 9222, wsUrl: 'ws://127.0.0.1:9222/devtools/browser/daily', pid: livePid });
+fakePidFile(livePid + 1, 62677);
+ok('缓存 pid 与 chrome.pid 不符 → 拒绝（防误连日常浏览器）',
+  validateCache(wsProf) === null);
+
+fakeCache({ port: 1234, wsUrl: 'ws://127.0.0.1:1234/devtools/browser/abc' });   // 缺 pid
+fakePidFile(livePid, 1234);
+ok('旧格式缓存（无 pid）→ 拒绝', validateCache(wsProf) === null);
+
+fs.writeFileSync(wsFile, 'not-json', 'utf-8');
+ok('损坏的缓存文件不抛异常', validateCache(wsProf) === null);
+
+fs.rmSync(wsProf, { recursive: true, force: true });
+
+ok('cdp.mjs 导出 WS_CACHE 常量', typeof cdpWsCache === 'string' && cdpWsCache.endsWith('devtools-ws.json'));
+ok('WS_CACHE 落在 profile 目录内', cdpWsCache.startsWith(cdpProfile));
 
 /* ---------- 模板解析 ---------- */
 group('read-plan.py');
