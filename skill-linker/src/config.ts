@@ -4,9 +4,15 @@ import { dirname, isAbsolute, resolve } from "node:path";
 
 import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
 
-import type { LoadedConfig, ModeConfig, SkillLinkerConfig } from "./types.js";
+import { PLATFORMS, type Platform } from "./platform.js";
+import type {
+  BaseInstructionConfig,
+  LoadedConfig,
+  ModeConfig,
+  SkillLinkerConfig,
+} from "./types.js";
 
-const DEFAULT_CONFIG_FILENAMES = ["skill-linker.config.jsonc", "skill-linker.config.json"] as const;
+const DEFAULT_CONFIG_FILENAMES = ["linker.config.jsonc", "linker.config.json"] as const;
 
 export class ConfigError extends Error {
   public constructor(message: string) {
@@ -42,7 +48,7 @@ export function resolveConfigPaths(
   }
 
   return [
-    ...DEFAULT_CONFIG_FILENAMES.map((filename) => resolve(homeDirectory, ".yonge-skill", filename)),
+    ...DEFAULT_CONFIG_FILENAMES.map((filename) => resolve(homeDirectory, ".yonge", filename)),
     ...DEFAULT_CONFIG_FILENAMES.map((filename) => resolve(cwd, filename)),
   ];
 }
@@ -54,6 +60,75 @@ export function resolveSourcePath(sourcePath: string, configDirectory: string): 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateBaseInstructions(
+  modeName: string,
+  value: unknown,
+  configPath: string,
+): BaseInstructionConfig {
+  if (!isRecord(value)) {
+    throw new ConfigError(
+      'mode "' + modeName + '" in ' + configPath + ' has an invalid "baseInstruction" object',
+    );
+  }
+
+  const baseInstruction: BaseInstructionConfig = {};
+
+  for (const platform of Object.keys(value) as Platform[]) {
+    if (!PLATFORMS.includes(platform)) {
+      throw new ConfigError(
+        'baseInstruction platform "' + platform + '" in mode "' + modeName + '" of ' +
+          configPath + ' must be one of ' + PLATFORMS.join(", "),
+      );
+    }
+
+    const entry = value[platform];
+    if (!isRecord(entry)) {
+      throw new ConfigError(
+        'baseInstruction "' + platform + '" in mode "' + modeName + '" of ' + configPath +
+          ' must be an object',
+      );
+    }
+
+    const allowedFields = ["PATH", "NAME"] as const;
+    for (const field of Object.keys(entry)) {
+      if (!(allowedFields as readonly string[]).includes(field)) {
+        throw new ConfigError(
+          'baseInstruction "' + platform + '" in mode "' + modeName + '" of ' + configPath +
+            ' contains unknown field "' + field + '"',
+        );
+      }
+    }
+
+    for (const field of allowedFields) {
+      const fieldValue = entry[field];
+      if (typeof fieldValue !== "string" || fieldValue.length === 0) {
+        throw new ConfigError(
+          'baseInstruction "' + platform + '" in mode "' + modeName + '" of ' + configPath +
+            ' requires a non-empty "' + field + '" string',
+        );
+      }
+    }
+
+    const name = entry.NAME as string;
+    if (
+      name === "." ||
+      name === ".." ||
+      name.includes("/") ||
+      name.includes("\\") ||
+      name.includes("\0")
+    ) {
+      throw new ConfigError(
+        'baseInstruction "' + platform + '" NAME in mode "' + modeName + '" of ' + configPath +
+          ' must be a single filename',
+      );
+    }
+
+    baseInstruction[platform] = { PATH: entry.PATH as string, NAME: name };
+  }
+
+  return baseInstruction;
 }
 
 function parseConfig(raw: string, configPath: string): SkillLinkerConfig {
@@ -87,30 +162,41 @@ function parseConfig(raw: string, configPath: string): SkillLinkerConfig {
     }
 
     if (!isRecord(modeValue)) {
-      throw new ConfigError(`mode "${mode}" in ${configPath} must be an object`);
+      throw new ConfigError('mode "' + mode + '" in ' + configPath + ' must be an object');
     }
 
     const hasSkills = Object.hasOwn(modeValue, "skills");
     const hasMcpServers = Object.hasOwn(modeValue, "mcpServers");
-    if (!hasSkills && !hasMcpServers) {
+    const hasBaseInstruction = Object.hasOwn(modeValue, "baseInstruction");
+    if (!hasSkills && !hasMcpServers && !hasBaseInstruction) {
       throw new ConfigError(
-        `mode "${mode}" in ${configPath} must contain "skills" or "mcpServers"`,
+        'mode "' + mode + '" in ' + configPath +
+          ' must contain "skills", "mcpServers", or "baseInstruction"',
       );
     }
 
     const skills = modeValue.skills ?? [];
     if (!Array.isArray(skills) || skills.some((entry) => typeof entry !== "string")) {
-      throw new ConfigError(`mode "${mode}" in ${configPath} has an invalid "skills" array`);
+      throw new ConfigError(
+        'mode "' + mode + '" in ' + configPath + ' has an invalid "skills" array',
+      );
     }
 
     const mcpServers = modeValue.mcpServers ?? {};
     if (!isRecord(mcpServers)) {
-      throw new ConfigError(`mode "${mode}" in ${configPath} has an invalid "mcpServers" object`);
+      throw new ConfigError(
+        'mode "' + mode + '" in ' + configPath + ' has an invalid "mcpServers" object',
+      );
     }
+
+    const baseInstruction = hasBaseInstruction
+      ? validateBaseInstructions(mode, modeValue.baseInstruction, configPath)
+      : {};
 
     modes[mode] = {
       skills: skills as string[],
       mcpServers,
+      baseInstruction,
     };
   }
 

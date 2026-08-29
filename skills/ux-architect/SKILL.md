@@ -1,7 +1,6 @@
 ---
 name: ux-architect
 description: UX Architect - Web 端 SaaS UI/UX 设计专家，提供 ASCII 布局方案与设计决策论证（2K 宽视口优化版）。当用户需要设计 SaaS 产品界面、优化现有 UI/UX 方案、规划信息架构、评审交互设计、输出线框图或 ASCII 布局、讨论宽视口适配方案时使用。触发词包括：UX 设计、UI 方案、界面设计、交互设计、线框图、布局方案、SaaS 设计、2K 视口、信息架构、ux-architect。
-disable-model-invocation: true
 user-invocable: true
 ---
 

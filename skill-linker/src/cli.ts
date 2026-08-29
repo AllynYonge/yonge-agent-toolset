@@ -6,7 +6,7 @@ import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { loadConfig, resolveSourcePath } from "./config.js";
-import { linkMode } from "./linker.js";
+import { linkBaseInstructions, linkMode, validateBaseInstructions } from "./linker.js";
 import { writeMcpServers } from "./mcp.js";
 import { isPlatform, type Platform } from "./platform.js";
 import type { ModeConfig } from "./types.js";
@@ -91,6 +91,12 @@ export async function run(
         loaded.config.modes,
         loaded.configDirectory,
       );
+      await validateBaseInstructions(
+        modeConfig.baseInstruction,
+        loaded.configDirectory,
+        cwd,
+        platforms,
+      );
       const linkResult = await linkMode(
         positionals.join(", "),
         modeConfig.skills,
@@ -99,7 +105,13 @@ export async function run(
         platforms,
       );
       const mcpResult = await writeMcpServers(modeConfig.mcpServers, cwd, platforms);
-      for (const warning of [...linkResult.warnings, ...mcpResult.warnings]) {
+      const baseResult = await linkBaseInstructions(
+        modeConfig.baseInstruction,
+        loaded.configDirectory,
+        cwd,
+        platforms,
+      );
+      for (const warning of [...linkResult.warnings, ...mcpResult.warnings, ...baseResult.warnings]) {
         stderr.write(`${warning}\n`);
       }
       for (const link of linkResult.created) {
@@ -110,6 +122,11 @@ export async function run(
       for (const server of mcpResult.written) {
         const destination = relative(cwd, server.destination) || ".";
         stdout.write(`MCP: ${server.name} -> ${destination}\n`);
+      }
+      for (const instruction of baseResult.created) {
+        const suffix = instruction.replaced ? " (replaced)" : "";
+        const destination = relative(cwd, instruction.destination) || ".";
+        stdout.write(`BASE: ${destination} -> ${instruction.target}${suffix}\n`);
       }
       return 0;
     }
@@ -130,6 +147,7 @@ function mergeModeConfigs(
   const skillsByName = new Map<string, string>();
   const invalidSkills: string[] = [];
   const mcpServers: Record<string, unknown> = {};
+  const baseInstruction: ModeConfig["baseInstruction"] = {};
 
   for (const modeName of modeNames) {
     const mode = modes[modeName] as ModeConfig;
@@ -148,11 +166,14 @@ function mergeModeConfigs(
       delete mcpServers[name];
       mcpServers[name] = server;
     }
+
+    Object.assign(baseInstruction, mode.baseInstruction);
   }
 
   return {
     skills: [...skillsByName.values(), ...invalidSkills],
     mcpServers,
+    baseInstruction,
   };
 }
 
@@ -167,8 +188,11 @@ function writeModeList(
     const skillNoun = config.skills.length === 1 ? "skill" : "skills";
     const mcpCount = Object.keys(config.mcpServers).length;
     const mcpNoun = mcpCount === 1 ? "MCP" : "MCPs";
+    const baseCount = Object.keys(config.baseInstruction).length;
+    const baseNoun = baseCount === 1 ? "baseInstruction" : "baseInstructions";
+    const baseSuffix = baseCount === 0 ? "" : `  ${baseCount} ${baseNoun}`;
     stdout.write(
-      `${mode.padEnd(width)}  ${config.skills.length} ${skillNoun}  ${mcpCount} ${mcpNoun}\n`,
+      `${mode.padEnd(width)}  ${config.skills.length} ${skillNoun}  ${mcpCount} ${mcpNoun}${baseSuffix}\n`,
     );
   }
 }

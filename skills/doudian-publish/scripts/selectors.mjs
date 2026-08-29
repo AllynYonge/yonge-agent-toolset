@@ -15,21 +15,40 @@
  *   needs —— 需要什么页面状态才存在。空表示白页就在。
  *            doctor 靠这个区分「真失效」和「本次条件不具备」，
  *            否则会把空白发布页上本就不存在的元素误报成选择器坏了。
+ *            取值：image（需先上传主图）、ai-live（需 AI 弹层正开着，
+ *            但弹层选完即关，所以 doctor 里这类项总是「跳过」）、
+ *            style-live（同理：风格下拉选完就收起）、
+ *            category（需先填标题并开类目弹层）、
+ *            step2（需先进详情表单）、manual（需先切手动填写）、sku（需先建好规格值）。
+ *   soft  —— 该项未命中不算「失效」：doudian-page.mjs 对它另有几何/文案兜底路径，
+ *            选择器只是加速命中的第一道尝试。doctor 会报成提醒而不是错误。
  *
  * 改动前先读 references/dom-notes.md，那里记着每处的交互序列约束。
  */
 
-/** needs 的取值含义 */
-export const NEEDS = {
-  IMAGE: 'image',       // 需先上传主图
-  CATEGORY: 'category', // 需先填标题（等 AI 识别）+ 点「手动选择类目」开弹层
-  STEP2: 'step2',       // 需先点「下一步」进详情表单
-  MANUAL: 'manual',     // 需先从「智能填写助手」切到手动填写
-  SKU: 'sku',           // 需先建好规格值，SKU 表才会生成
-};
-
 /** 语义化优先级：先试 hash，命中不了再逐个试 alt */
 export const SEL = {
+  // ---------- 新版智能填写前置页 ----------
+  materialUploadInput: {
+    hash: 'input[type=file][accept=".jpg,.png,.jpeg,.csv,.xls,.xlsx"]',
+    alt: ['input[data-testid="pub-by-pic-card-dragger"]'],
+    note: '智能填写助手资料上传 input（至少包含一张商品图）',
+    stage: 'step1',
+  },
+  materialNextButton: {
+    hash: 'button.styles-module_nextButton__Y91rv',
+    alt: [],
+    note: '资料上传页「下一步，生成商品」按钮',
+    stage: 'step1',
+  },
+  smartConfirmButton: {
+    hash: 'button.style_aiPublishButton__DLNg7',
+    alt: ['button[class*=aiPublishButton]'],
+    note: '智能填写页「确认信息，继续生成」按钮',
+    stage: 'step1',
+    needs: 'image',
+  },
+
   // ---------- 第一步页 ----------
   firstImageInput: {
     hash: 'input[type=file][accept="image/*"]',
@@ -56,6 +75,25 @@ export const SEL = {
     note: '商品标题输入框（第一步页只有这一个）',
     stage: 'step1',
   },
+  aiTitleButton: {
+    hash: '.ecom-g-input-suffix img',
+    alt: ['.ecom-g-dropdown-trigger .ecom-g-input-suffix img'],
+    note: 'AI 标题按钮（标题框 suffix 里的 20×20 img，无 class，紧挨字数计数器 0/60）。代码另有几何兜底',
+    stage: 'step1',
+    needs: 'image',
+    soft: true,
+  },
+  aiTitleOption: {
+    hash: '.ecom-g-dropdown-menu .ecom-g-dropdown-menu-item',
+    alt: ['.ecom-g-dropdown-menu li'],
+    note: 'AI 推荐标题列表项（点 AI 后弹出的 ecom-g-dropdown，取位置最上那条；底部「重新生成」按钮靠文案黑名单排除）',
+    stage: 'step1',
+    // 注意：弹层选完就关了，事后探不到。doctor 靠 aiTitleAndCategory 的回报
+    // 判它通不通（needs: 'ai-live' 永远不会被标为已满足，因此总是「跳过」），
+    // 而不是事后去 querySelector —— 否则会报假失效。
+    needs: 'ai-live',
+    soft: true,
+  },
   categoryHistory: {
     hash: '.style_searchHistoryItems__FdSkW',
     alt: ['div[class*=searchHistoryItems]'],
@@ -63,25 +101,11 @@ export const SEL = {
     stage: 'step1',
     needs: 'category',
   },
-  categorySelector: {
-    hash: '[class*=categorySelectorV2]',
-    alt: ['[class*=allCategory]', '[class*=categoryGroupTitle]'],
-    note: '类目选择器弹层容器',
-    stage: 'step1',
-    needs: 'category',
-  },
-  categoryConfirm: {
-    hash: 'button.ecom-g-btn-primary',
-    alt: [],
-    note: '类目弹层的确认按钮',
-    stage: 'step1',
-  },
-
   // ---------- 第二步页 ----------
   fabricSelect: {
-    hash: 'aurora-dorami-composition-select',
-    alt: ['[class*=composition-select]'],
-    note: '面料材质选择器（材质+含量两段式）',
+    hash: '.aurora-dorami-composition-select-select',
+    alt: ['.aurora-dorami-composition-select-wrapper', '[class*=composition-select]'],
+    note: '面料材质选择器（点外层容器，不要点 4px 宽的内部 aurora-select-input）',
     stage: 'step2',
     needs: 'step2',
   },
@@ -92,12 +116,37 @@ export const SEL = {
     stage: 'step2',
     needs: 'step2',
   },
+  shortTitleInput: {
+    hash: 'input[dropdownclassname="auto-dropdown-id-导购短标题"]',
+    alt: ['input[placeholder*="简明准确的标题内容"]'],
+    note: '导购短标题输入框（suffix 里的 20×20 img 就是 AI 按钮，点完 5-7s 直接回填，不弹推荐列表）',
+    stage: 'step2',
+    needs: 'step2',
+  },
+  // 风格是 ecom-g-tree-select（非 ecom-g-select），选项虚拟滚动，靠搜索框过滤命中。
+  // 详见 references/style-options.md。
+  styleSelect: {
+    hash: '.styles_multiSelect__Nmxaq.ecom-g-tree-select',
+    alt: ['.ecom-g-tree-select.ecom-g-select-multiple'],
+    note: '风格多选框（最多 5 项）。代码另有「风格文案→兄弟节点」的文案兵底',
+    stage: 'step2',
+    needs: 'step2',
+    soft: true,
+  },
+  styleTreeNode: {
+    hash: '.ecom-g-tree-select-dropdown .ecom-g-select-tree-title',
+    alt: ['.ecom-g-select-tree-node-content-wrapper'],
+    note: '风格选项节点文案（面板需已展开）',
+    stage: 'step2',
+    needs: 'style-live',
+    soft: true,
+  },
 
   // ---------- 规格设置 ----------
   specSwitchButton: {
-    hash: 'button.style_switchButton__guvWZ',
+    hash: '[data-dp=manualspec]',
     alt: ['button[class*=switchButton]'],
-    note: '从「智能填写助手」切到手动填写的按钮',
+    note: '从「智能填写助手」切到手动填写的按钮（现按文案「切换手动填写」定位）',
     stage: 'spec',
     needs: 'step2',
   },
@@ -143,6 +192,12 @@ export const SEL = {
     stage: 'spec',
     needs: 'sku',
   },
+  // 尺码面板有两种随机切换的视图，两边的选项容器类名完全不同（一个是
+  // li.ecom-g-cascader-menu-item，一个是带 CSS Modules 哈希的 div）。所以 setSizes
+  // 不按类名找选项，而是抽两边共同的结构不变量：
+  // 「面板里的 input[type=checkbox] + 从它往上走找到的短文案祖先」。
+  // 因此这里**故意不登记**尺码选项的哈希 —— 登了反而会让 doctor 报假阳性
+  // （哈希变了但功能完好）。参见 references/dom-notes.md「尺码」节。
   specConfirmCheck: {
     hash: '[data-kora=确认]',
     alt: [],
@@ -180,7 +235,6 @@ export const SKU_CELL = {
   price: '请输入',
   stock: '请输入库存',
   code: '请输入erp编码',
-  barcode: '请输入条形码',
 };
 
 /** 关键文案锚点。页面改版时文案通常比类名稳定，用于兜底与 doctor 校验。 */

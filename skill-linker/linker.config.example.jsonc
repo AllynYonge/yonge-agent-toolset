@@ -25,6 +25,12 @@
             "NODE_ENV": "development",
             "LOG_LEVEL": "info",
           },
+
+          // 可选。等待 MCP 启动的秒数，必须是正整数。
+          // Codex 原样写入 startup_timeout_sec；
+          // OpenCode 换算成 timeout 毫秒；
+          // Claude Code 忽略该字段。
+          "startup_timeout_sec": 120,
         },
 
         "context7": {
@@ -40,9 +46,25 @@
           },
         },
       },
+
+      // 各平台的基础指令文件。PATH 必须指向文件；相对路径以本配置文件所在目录为基准。
+      "baseInstruction": {
+        "claude": {
+          "PATH": "../CLAUDE.md",
+          "NAME": "CLAUDE.md",
+        },
+        "codex": {
+          "PATH": "../AGENTS.md",
+          "NAME": "AGENTS.md",
+        },
+        "agents": {
+          "PATH": "../AGENTS.md",
+          "NAME": "AGENTS.md",
+        },
+      },
     },
 
-    // 只配置 SKILL 的模式可以省略 mcpServers。
+    // 只配置 SKILL 的模式可以省略 mcpServers 和 baseInstruction。
     "research": {
       "skills": [
         "../skills/article-analysis",

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, realpath, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -6,7 +6,7 @@ import { afterEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { ConfigError } from "../src/config.js";
-import { linkMode } from "../src/linker.js";
+import { linkBaseInstructions, linkMode, validateBaseInstructions } from "../src/linker.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -106,6 +106,93 @@ describe("linkMode", () => {
       linkMode("dev", [first, second], root, join(root, "output"), ["codex"]),
       (error: unknown) => error instanceof ConfigError && /duplicate link name/.test(error.message),
     );
+  });
+
+  it("links base instruction files using platform destinations", async () => {
+    const root = await makeWorkspace();
+    const claudeInstruction = join(root, "CLAUDE.md");
+    const agentsInstruction = join(root, "AGENTS.md");
+    await writeFile(claudeInstruction, "claude\n");
+    await writeFile(agentsInstruction, "agents\n");
+
+    const result = await linkBaseInstructions(
+      {
+        claude: { PATH: claudeInstruction, NAME: "CLAUDE.md" },
+        codex: { PATH: agentsInstruction, NAME: "AGENTS.md" },
+        agents: { PATH: agentsInstruction, NAME: "opencode-AGENTS.md" },
+      },
+      root,
+      join(root, "output"),
+      ["codex", "claude", "agents"],
+    );
+
+    assert.deepEqual(result.warnings, []);
+    assert.equal(result.created.length, 3);
+    assert.equal(await realpath(join(root, "output", ".claude", "CLAUDE.md")), await realpath(claudeInstruction));
+    assert.equal(await realpath(join(root, "output", "AGENTS.md")), await realpath(agentsInstruction));
+    assert.equal(await realpath(join(root, "output", "opencode-AGENTS.md")), await realpath(agentsInstruction));
+  });
+
+  it("replaces base instruction symlinks but warns for regular files", async () => {
+    const root = await makeWorkspace();
+    const source = join(root, "instruction.md");
+    const oldSource = join(root, "old.md");
+    await writeFile(source, "new\n");
+    await writeFile(oldSource, "old\n");
+    const cwd = join(root, "output");
+    await mkdir(join(cwd, ".claude"), { recursive: true });
+    await symlink(oldSource, join(cwd, ".claude", "CLAUDE.md"), "file");
+    await writeFile(join(cwd, "AGENTS.md"), "keep\n");
+
+    const result = await linkBaseInstructions(
+      {
+        claude: { PATH: source, NAME: "CLAUDE.md" },
+        codex: { PATH: source, NAME: "AGENTS.md" },
+      },
+      root,
+      cwd,
+      ["claude", "codex"],
+    );
+
+    assert.equal(result.created.length, 1);
+    assert.equal(result.created[0]?.replaced, true);
+    assert.equal(result.warnings.length, 1);
+    assert.match(result.warnings[0] ?? "", /destination exists and is not a symlink/);
+    assert.equal(await realpath(join(cwd, ".claude", "CLAUDE.md")), await realpath(source));
+    assert.equal(await readFile(join(cwd, "AGENTS.md"), "utf8"), "keep\n");
+  });
+
+  it("rejects missing paths and conflicting base instruction destinations before linking", async () => {
+    const root = await makeWorkspace();
+    const source = join(root, "instruction.md");
+    await writeFile(source, "instruction\n");
+    const cwd = join(root, "output");
+
+    await assert.rejects(
+      validateBaseInstructions(
+        { claude: { PATH: join(root, "missing.md"), NAME: "CLAUDE.md" } },
+        root,
+        cwd,
+        ["claude"],
+      ),
+      /PATH does not exist/,
+    );
+
+    await assert.rejects(
+      validateBaseInstructions(
+        {
+          codex: { PATH: source, NAME: "AGENTS.md" },
+          agents: { PATH: source, NAME: "AGENTS.md" },
+        },
+        root,
+        cwd,
+        ["codex", "agents"],
+      ),
+      /destinations conflict/,
+    );
+
+    assert.equal((await linkBaseInstructions({}, root, cwd, ["claude"])).created.length, 0);
+    await assert.rejects(lstat(cwd), { code: "ENOENT" });
   });
 
   it("creates platform directories when every source is invalid", async () => {

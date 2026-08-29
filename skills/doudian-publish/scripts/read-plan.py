@@ -10,12 +10,21 @@
   "items": [ { 款号, 标题, 类目[], 面料材质, 材质含量[], 素材目录,
                规格组名, 规格值[], 尺码[], 价格{}, 库存{}, 库存明细{},
                商家编码规则, 商品状态, 尺码表模板, 运费模板,
-               素材: { 主图[], 详情图[], 规格图{}, 视频, 白底图 },
+               订单库存计数, 发货时效,
+               素材: { 主图[], 详情图[], 规格图{}, 规格图回退[], 参考图[] },
                警告[] } ],
   "errors": [...],                   # 阻断性问题
   "未生效配置": [...]                 # 「全局默认」里填了但脚本不消费的项
 }
+
+「风格」不在模板里：上品时由 agent 看主图判定，通过 publish.mjs 的 `--styles <json>` 传入
+（见 SKILL.md Step 2.5）。判断靠视觉，本脚本不参与。
+
+「参考图」列支持两种写法：单元格内嵌图片（推荐），或填图片/目录路径（| 分隔）。
+内嵌图片会被导出到 <素材目录>/参考图/ 下（幂等，同内容跳过），这是本脚本唯一的
+写文件副作用。参考图仅供人工参考，不上传抖店。
 """
+import hashlib
 import json
 import os
 import re
@@ -23,15 +32,19 @@ import sys
 
 try:
     import openpyxl
-except ImportError:
-    print(json.dumps({"errors": ["缺少 openpyxl，请先执行 pip3 install openpyxl"]},
+    from PIL import Image
+except ImportError as exc:
+    print(json.dumps({"errors": [f"缺少 Excel/图片依赖: {exc}，请执行 pip3 install openpyxl Pillow"]},
                      ensure_ascii=False))
     sys.exit(1)
 
 IMG_EXT = (".jpg", ".jpeg", ".png")
-VIDEO_EXT = (".mp4", ".mov")
 
-REQUIRED = ["款号", "类目", "面料材质", "素材目录", "规格组名", "规格值", "尺码", "价格", "库存"]
+REQUIRED = ["款号", "类目", "面料材质", "素材目录", "参考图",
+            "规格组名", "规格值", "尺码", "价格", "库存"]
+
+# 参考图导出目录名，位于该款素材目录下
+REF_DIRNAME = "参考图"
 
 
 def norm_header(v):
@@ -80,13 +93,16 @@ def parse_material(fabric, content):
 
 def resolve_materials(mat_dir, spec_values):
     """按命名规范收集素材文件。严格前缀匹配，不做模糊推断。"""
-    result = {"主图": [], "详情图": [], "规格图": {}, "视频": None, "白底图": None}
+    result = {"主图": [], "详情图": [], "规格图": {}, "规格图回退": [], "参考图": []}
     warns = []
+    errors = []
     if not mat_dir or not os.path.isdir(mat_dir):
         warns.append(f"素材目录不存在: {mat_dir}")
-        return result, warns
+        return result, warns, errors
 
     names = sorted(os.listdir(mat_dir))
+    main_images = {}
+    normalized_main = {}
     for n in names:
         full = os.path.join(mat_dir, n)
         if not os.path.isfile(full):
@@ -94,32 +110,132 @@ def resolve_materials(mat_dir, spec_values):
         low = n.lower()
         stem = os.path.splitext(n)[0]
         if n.startswith("主图") and low.endswith(IMG_EXT):
-            result["主图"].append(full)
-        elif n.startswith("详情图") and low.endswith(IMG_EXT):
+            base = re.sub(r"_1x1$", "", stem, flags=re.IGNORECASE)
+            if stem.lower().endswith("_1x1"):
+                normalized_main[base] = full
+            else:
+                main_images[base] = full
+
+    # 规范化脚本生成的 *_1x1.jpg 优先于原图，避免同一张图片被重复上传。
+    for base in sorted(set(main_images) | set(normalized_main), key=lambda x: [int(y) if y.isdigit() else y for y in re.split(r"(\d+)", x)]):
+        result["主图"].append(normalized_main.get(base) or main_images[base])
+
+    for n in names:
+        full = os.path.join(mat_dir, n)
+        if not os.path.isfile(full):
+            continue
+        low = n.lower()
+        stem = os.path.splitext(n)[0]
+        if n.startswith("主图") and low.endswith(IMG_EXT):
+            continue
+        if n.startswith("详情图") and low.endswith(IMG_EXT):
             result["详情图"].append(full)
         elif n.startswith("SKU_") and low.endswith(IMG_EXT):
             result["规格图"][stem[4:]] = full
-        elif n.startswith("视频") and low.endswith(VIDEO_EXT):
-            result["视频"] = result["视频"] or full
-        elif stem == "白底图" and low.endswith(IMG_EXT):
-            result["白底图"] = full
         elif n.startswith("尺码表") and low.endswith(IMG_EXT):
             result["详情图"].append(full)   # 尺码表图归入详情图，放末尾
         elif low.endswith(".jfif"):
             warns.append(f"jfif 需转 jpg: {n}")
 
-    result["主图"].sort()
+    result["主图"].sort(key=lambda p: [int(x) if x.isdigit() else x for x in re.split(r"(\d+)", os.path.basename(p))])
     result["详情图"].sort(key=lambda p: (os.path.basename(p).startswith("尺码表"),
                                         os.path.basename(p)))
+
+    for image in result["主图"]:
+        try:
+            with Image.open(image) as opened:
+                if opened.width != opened.height:
+                    errors.append(f"主图必须为 1:1: {os.path.basename(image)}（当前 {opened.width}x{opened.height}）")
+        except Exception as exc:
+            errors.append(f"主图无法读取: {os.path.basename(image)}（{exc}）")
 
     if len(result["主图"]) < 3:
         warns.append(f"主图仅 {len(result['主图'])} 张，抖店建议 3-5 张")
     if not result["详情图"]:
-        warns.append("缺少详情图")
+        warns.append("缺少详情图（不阻断，可在草稿中补充）")
     missing = [v for v in spec_values if v not in result["规格图"]]
     if missing:
-        warns.append(f"缺少规格图: {'、'.join(missing)}（文件名应为 SKU_<规格值>.jpg）")
-    return result, warns
+        if result["主图"]:
+            fallback = result["主图"][0]
+            for value in missing:
+                result["规格图"][value] = fallback
+            result["规格图回退"] = missing
+            warns.append(f"缺少规格图: {'、'.join(missing)}，已默认使用主图 {os.path.basename(fallback)}")
+        else:
+            warns.append(f"缺少规格图: {'、'.join(missing)}（无主图可回退）")
+    return result, warns, errors
+
+
+def collect_embedded_images(ws):
+    """按 (行, 列) 收集单元格内嵌/浮动图片的二进制数据。
+
+    openpyxl 读到的图片挂在 worksheet._images 上，锚点 _from 是 0-based，
+    这里统一转成 1-based，与 iter_rows 的行号对齐。
+    """
+    buckets = {}
+    for image in getattr(ws, "_images", []):
+        anchor = getattr(image, "anchor", None)
+        frm = getattr(anchor, "_from", None)
+        if frm is None:
+            continue
+        try:
+            data = image._data()
+        except Exception:
+            continue
+        ext = (getattr(image, "format", None) or "png").lower()
+        if ext == "jpeg":
+            ext = "jpg"
+        buckets.setdefault((frm.row + 1, frm.col + 1), []).append((ext, data))
+    return buckets
+
+
+def export_embedded_refs(code, images, mat_dir):
+    """把内嵌参考图写到 <素材目录>/参考图/ 下，返回 (路径列表, 错误列表)。
+
+    文件名 参考图NN_<内容哈希前8位>.<ext>：内容变了才会产生新文件，
+    重复跑不会累积同一张图，也不会覆盖用户手放进去的文件。
+    """
+    if not images:
+        return [], []
+    out_dir = os.path.join(mat_dir, REF_DIRNAME)
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except OSError as exc:
+        return [], [f"参考图目录无法创建: {out_dir}（{exc}）"]
+
+    paths, errors = [], []
+    for i, (ext, data) in enumerate(images, start=1):
+        digest = hashlib.sha1(data).hexdigest()[:8]
+        target = os.path.join(out_dir, f"{REF_DIRNAME}{i:02d}_{digest}.{ext}")
+        try:
+            if not os.path.exists(target):
+                with open(target, "wb") as fh:
+                    fh.write(data)
+            paths.append(target)
+        except OSError as exc:
+            errors.append(f"参考图写入失败: {os.path.basename(target)}（{exc}）")
+    return paths, errors
+
+
+def resolve_ref_paths(raw, root):
+    """解析「参考图」列里手写的路径（| 分隔）。目录则收其下全部图片。"""
+    paths, errors = [], []
+    for part in split_pipe(raw):
+        target = part if os.path.isabs(part) else os.path.join(root, part)
+        target = os.path.abspath(target)
+        if os.path.isdir(target):
+            found = sorted(
+                os.path.join(target, n) for n in os.listdir(target)
+                if n.lower().endswith(IMG_EXT) and os.path.isfile(os.path.join(target, n))
+            )
+            if not found:
+                errors.append(f"参考图目录里没有图片: {part}")
+            paths.extend(found)
+        elif os.path.isfile(target) and target.lower().endswith(IMG_EXT):
+            paths.append(target)
+        else:
+            errors.append(f"参考图路径不存在或不是图片: {part}")
+    return paths, errors
 
 
 def read_defaults(wb):
@@ -134,9 +250,10 @@ def read_defaults(wb):
 
 
 # 「全局默认」里脚本真正会写入页面的配置项。
-# 其余项（发货模式/发货时效/售后政策/订单库存计数）目前取页面默认值，
-# 填了不会生效 —— 必须显式告知用户，不能让人以为改了就管用。
-CONSUMED_DEFAULTS = {"品牌", "运费模板", "商品状态", "尺码表模板", "商家编码规则"}
+# 剩下的（发货模式 / 售后政策）目前取页面默认值，填了不会生效 ——
+# 必须显式告知用户，不能让人以为改了就管用。
+CONSUMED_DEFAULTS = {"品牌", "运费模板", "商品状态", "尺码表模板", "商家编码规则",
+                     "订单库存计数", "发货时效"}
 
 
 def check_defaults(defaults):
@@ -170,6 +287,7 @@ def main():
 
     headers = [norm_header(c.value) for c in ws[1]]
     idx = {h: i for i, h in enumerate(headers) if h}
+    embedded = collect_embedded_images(ws)
 
     missing_cols = [c for c in REQUIRED if c not in idx]
     if missing_cols:
@@ -208,9 +326,21 @@ def main():
 
         mat_raw = str(cell(row, "素材目录") or "")
         mat_dir = mat_raw if os.path.isabs(mat_raw) else os.path.join(root, mat_raw)
-        materials, warns = resolve_materials(mat_dir, spec_values)
+        materials, warns, asset_errors = resolve_materials(mat_dir, spec_values)
 
-        row_errors = []
+        # 参考图：优先用单元格内嵌图片，其次用列里手写的路径。
+        ref_col = idx.get("参考图")
+        ref_images = embedded.get((r, ref_col + 1), []) if ref_col is not None else []
+        ref_paths, ref_errors = export_embedded_refs(code, ref_images, mat_dir)
+        if not ref_paths:
+            ref_paths, ref_errors = resolve_ref_paths(cell(row, "参考图"), root)
+        materials["参考图"] = ref_paths
+
+        row_errors = list(asset_errors) + ref_errors
+        if not ref_paths:
+            row_errors.append("缺少参考图（在「参考图」单元格里插入图片，或填图片/目录路径）")
+        if not materials["主图"]:
+            row_errors.append("缺少主图（至少需要主图01.jpg 等规范文件）")
         if not spec_values:
             row_errors.append("规格值为空")
         if not sizes:
@@ -247,6 +377,9 @@ def main():
             "商家编码规则": str(cell(row, "商家编码规则") or
                            defaults.get("商家编码规则", "{款号}-{规格值}-{尺码}")),
             "商品状态": str(cell(row, "商品状态") or defaults.get("商品状态", "下架")),
+            "订单库存计数": str(cell(row, "订单库存计数") or
+                          defaults.get("订单库存计数", "付款减库存")),
+            "发货时效": str(cell(row, "发货时效") or defaults.get("发货时效", "48小时")),
             "尺码表模板": str(cell(row, "尺码表模板") or defaults.get("尺码表模板", "")),
             "运费模板": str(cell(row, "运费模板") or defaults.get("运费模板", "")),
             "素材": materials,

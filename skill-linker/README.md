@@ -6,12 +6,12 @@ Link groups of SKILL directories and write project MCP configurations for Agent 
 
 By default, the CLI searches the following locations in order:
 
-1. `~/.yonge-skill/skill-linker.config.jsonc`
-2. `~/.yonge-skill/skill-linker.config.json`
-3. `skill-linker.config.jsonc` in the current working directory
-4. `skill-linker.config.json` in the current working directory
+1. `~/.yonge/linker.config.jsonc`
+2. `~/.yonge/linker.config.json`
+3. `linker.config.jsonc` in the current working directory
+4. `linker.config.json` in the current working directory
 
-JSONC comments and trailing commas are supported. Plain JSON remains compatible. See `skill-linker.config.example.jsonc` for a commented configuration example:
+JSONC comments and trailing commas are supported. Plain JSON remains compatible. See `linker.config.example.jsonc` for a commented configuration example:
 
 ```jsonc
 {
@@ -31,6 +31,7 @@ JSONC comments and trailing commas are supported. Plain JSON remains compatible.
             "NODE_ENV": "development",
             "LOG_LEVEL": "info"
           },
+          "startup_timeout_sec": 120,
         },
         "context7": {
           "type": "remote",
@@ -41,32 +42,44 @@ JSONC comments and trailing commas are supported. Plain JSON remains compatible.
           },
         }
       },
+
+      "baseInstruction": {
+        "claude": { "PATH": "../CLAUDE.md", "NAME": "CLAUDE.md" },
+        "codex": { "PATH": "../AGENTS.md", "NAME": "AGENTS.md" },
+        "agents": { "PATH": "../AGENTS.md", "NAME": "AGENTS.md" }
+      }
     },
   },
 }
 ```
 
-Each mode must contain `skills` or `mcpServers`. The previous array-only mode format is not supported. Each SKILL source directory must contain `SKILL.md`; relative source paths are resolved relative to the configuration file.
+Each mode must contain `skills`, `mcpServers`, or `baseInstruction`. The previous array-only mode format is not supported. Each SKILL source directory must contain `SKILL.md`; relative source paths are resolved relative to the configuration file.
+
+A `baseInstruction` entry supports only the platform keys `codex`, `claude`, and `agents`, and each entry supports only non-empty `PATH` and `NAME` fields. `PATH` must point to a file. `NAME` must be a single filename. Relative `PATH` values are resolved relative to the configuration file.
 
 ```bash
 npx @yonge/skill-linker list
 npx @yonge/skill-linker link dev --platform codex
 npx @yonge/skill-linker link dev research --platform codex
-npx @yonge/skill-linker link dev --config /path/to/skill-linker.config.json
+npx @yonge/skill-linker link dev --config /path/to/linker.config.json
 ```
 
 The `--config` option overrides the default search for that command only.
 
 Supported platforms are `codex`, `claude`, and `agents`. Omitting `--platform` processes all three platforms.
 
-The `link` command accepts one or more modes. Modes are merged from left to right; a later mode replaces an earlier mode's same-name SKILL or MCP server. Repeated identical SKILL paths are deduplicated. If any requested mode does not exist, the command exits before making changes.
+The `link` command accepts one or more modes. Modes are merged from left to right; a later mode replaces an earlier mode's same-name SKILL, MCP server, or same-platform base instruction. Repeated identical SKILL paths are deduplicated. If any requested mode does not exist, the command exits before making changes.
 
-| Platform | SKILL directory | Project MCP config |
-| --- | --- | --- |
-| `codex` | `.codex/skills` | `.codex/config.toml` |
-| `claude` | `.claude/skills` | `.mcp.json` |
-| `agents` | `.agents/skills` | `opencode.json` |
+| Platform | SKILL directory | Project MCP config | Base instruction link |
+| --- | --- | --- | --- |
+| `codex` | `.codex/skills` | `.codex/config.toml` | Project root `NAME` |
+| `claude` | `.claude/skills` | `.mcp.json` | `.claude/NAME` |
+| `agents` | `.agents/skills` | `opencode.json` | Project root `NAME` |
 
 Links are created in platform `skills` directories under the current working directory. Existing symlinks with the same name are replaced. Existing files and directories are left untouched and skipped silently. Invalid source paths and MCP definitions are skipped with a warning on stderr.
 
 MCP configurations are merged by service name. Existing unrelated settings and MCP services are preserved; a configured service replaces an existing service with the same name. Environment variables and headers are written exactly as configured and are not expanded or printed.
+
+Both local and remote MCP entries accept an optional `startup_timeout_sec` positive integer. Codex writes it as `startup_timeout_sec` in seconds. OpenCode writes it as `timeout` in milliseconds (`startup_timeout_sec * 1000`). Claude Code ignores it because its project MCP config has no equivalent per-server startup timeout field.
+
+Base instruction `PATH` values and destination conflicts are checked before any changes are made. If a selected `PATH` does not point to a file, or multiple selected base instructions resolve to the same destination, the command exits without writing SKILL, MCP, or base instruction changes. Existing base instruction symlinks are replaced; existing regular files or directories are kept and reported as warnings. Destination comparisons follow the current filesystem's casing behavior.

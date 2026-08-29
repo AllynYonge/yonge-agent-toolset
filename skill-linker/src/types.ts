@@ -1,10 +1,20 @@
+import type { Platform } from "./platform.js";
+
 export interface SkillLinkerConfig {
   modes: Record<string, ModeConfig>;
 }
 
+export interface BaseInstructionEntry {
+  PATH: string;
+  NAME: string;
+}
+
+export type BaseInstructionConfig = Partial<Record<Platform, BaseInstructionEntry>>;
+
 export interface ModeConfig {
   skills: string[];
   mcpServers: Record<string, unknown>;
+  baseInstruction: BaseInstructionConfig;
 }
 
 export interface LocalMcpServerConfig {
@@ -12,12 +22,14 @@ export interface LocalMcpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  startup_timeout_sec?: number;
 }
 
 export interface RemoteMcpServerConfig {
   type: "remote";
   url: string;
   headers?: Record<string, string>;
+  startup_timeout_sec?: number;
 }
 
 export type McpServerConfig = LocalMcpServerConfig | RemoteMcpServerConfig;

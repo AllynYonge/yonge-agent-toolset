@@ -14,8 +14,10 @@ export const PLATFORM_MCP_FILES = {
 
 export type Platform = keyof typeof PLATFORM_DIRECTORIES;
 
+export const PLATFORMS: readonly Platform[] = ["codex", "claude", "agents"];
+
 export function isPlatform(value: string): value is Platform {
-  return Object.hasOwn(PLATFORM_DIRECTORIES, value);
+  return PLATFORMS.includes(value as Platform);
 }
 
 export function resolvePlatformDirectory(cwd: string, platform: Platform): string {
@@ -24,4 +26,21 @@ export function resolvePlatformDirectory(cwd: string, platform: Platform): strin
 
 export function resolvePlatformMcpFile(cwd: string, platform: Platform): string {
   return resolve(cwd, PLATFORM_MCP_FILES[platform]);
+}
+
+export const PLATFORM_BASE_INSTRUCTION_DESTINATIONS = {
+  codex: "",
+  claude: ".claude",
+  agents: "",
+} as const satisfies Record<Platform, string>;
+
+export function resolvePlatformBaseInstructionFile(
+  cwd: string,
+  platform: Platform,
+  name: string,
+): string {
+  const directory = PLATFORM_BASE_INSTRUCTION_DESTINATIONS[platform];
+  return directory.length === 0
+    ? resolve(cwd, name)
+    : resolve(cwd, directory, name);
 }

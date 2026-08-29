@@ -21,11 +21,6 @@ export const DEDICATED_PROFILE = process.env.DOUDIAN_PROFILE_DIR?.trim()
   ? path.resolve(process.env.DOUDIAN_PROFILE_DIR.trim())
   : path.join(os.homedir(), '.yonge', 'doudian', 'chrome-profile');
 
-/** 进程生命周期记录文件，放在 profile 目录内，随 profile 一起迁移 */
-export const PID_FILE = path.join(DEDICATED_PROFILE, 'chrome.pid');
-export const OUT_LOG = path.join(DEDICATED_PROFILE, 'chrome-out.log');
-export const ERR_LOG = path.join(DEDICATED_PROFILE, 'chrome-err.log');
-
 /**
  * 缓存的 browser 级 WebSocket 终结点。
  *
@@ -171,7 +166,27 @@ export function findChrome() {
   return CHROME_CANDIDATES.find((p) => fs.existsSync(p));
 }
 
-export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/**
+ * 带随机抖动的等待。
+ *
+ * 为何不用固定值：固定的 800/1500/2500 每次跑一模一样，**方差为零这个特征
+ * 本身就是自动化指纹**—— 真人的操作间隔是离散且随机的。把固定值翻倍
+ * 只是把赌注加大，指纹还在（一串精确的 3000ms 比 1500ms 更可疑）。
+ *
+ * 区间取 [0.8, 1.75) 倍：下限不把原本必要的等待削得太短，
+ * 上限给渲染慢的情况留余量，期望值约 1.27 倍。
+ * 真正的可靠性靠 waitFor 类条件等待保证，不靠把 sleep 调长。
+ *
+ * DOUDIAN_NO_JITTER=1 关掉抖动（给 selftest 用，保证可重现）。
+ */
+const JITTER_OFF = process.env.DOUDIAN_NO_JITTER === '1';
+
+export const jitter = (ms) => (JITTER_OFF ? ms : Math.round(ms * (0.8 + Math.random() * 0.95)));
+
+export const sleep = (ms) => new Promise((r) => setTimeout(r, jitter(ms)));
+
+/** 不加抖动的等待。给轮询步进、鼠标事件间隔这种不需要拟人的内部节奏用。 */
+export const sleepExact = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function httpJson(url, timeoutMs = 4000) {
   const ctrl = new AbortController();
@@ -444,7 +459,7 @@ export async function launchDedicated({ profile = DEDICATED_PROFILE, port, url =
 
   const start = Date.now();
   while (Date.now() - start < 40000) {
-    await sleep(1000);
+    await sleepExact(1000);
     // cacheFor 传刚 spawn 出来的 pid：这里肯定是该 profile 自己的实例，
     // 可以安全地把 wsUrl 写进缓存，后续连接就能跳过 HTTP、不再弹确认框。
     const conn = await connectBrowser(usePort, { profile, cacheFor: child.pid });
@@ -471,20 +486,251 @@ export function readDedicatedPid(profile = DEDICATED_PROFILE) {
   }
 }
 
-/** 判断专用 profile 里是否已登录抖店 */
-export async function isLoggedIn(conn) {
-  const page = await openPage('https://fxg.jinritemai.com/ffa/g/create', { conn });
+/* ---------- 登录态检测 ---------- */
+
+/**
+ * 登录探针落地页。
+ *
+ * 注意别用 https://fxg.jinritemai.com/ ——那是**对外招商官网**，登录与否都能打开，
+ * 而且页面上就写着「登录抖店」「登录入口」，拿文本判断必然误判成未登录。
+ * 已登录时它也**不会**跳工作台。必须用需要鉴权的后台路径：未登录会被重定向到
+ * /login/common，已登录则留在 /ffa/... 并渲染出侧边菜单。这是实测踩过的坑。
+ */
+export const DOUDIAN_HOME = 'https://fxg.jinritemai.com/ffa/mshop/homepage/index';
+export const DOUDIAN_LOGIN = 'https://fxg.jinritemai.com/login/common';
+
+/**
+ * URL 分类：
+ *   login     = 登录页/护照页（未登录时抖店把后台路径重定向到这里）
+ *   app       = 已进入需要鉴权的后台路径（/ffa/...）
+ *   marketing = 抖店对外官网（根路径），登录与否都能打开 → 不能作为判据
+ *   other     = 非抖店（about:blank、扩展页、别的站）
+ *
+ * 只看 URL 不看内容，足够便宜，可用于高频轮询。
+ */
+/**
+ * 严格匹配工作台首页（整个发布流程的起点：工作台 → 点「商品创建」→ 发布页）。
+ *
+ * 只认 /ffa/mshop/homepage，不放宽到任意 /ffa/ 后台页——那样可能接管到用户
+ * 正在手工编辑的发布页，把人家填的内容冲掉。
+ */
+export function isDoudianHomepageUrl(url = '') {
+  return /^https?:\/\/[^/]*jinritemai\.com\/ffa\/mshop\/homepage\b/i.test(url);
+}
+
+/**
+ * attach 到一个**已存在**的 tab。
+ * owned=false → close() 不会去关它（那是用户自己开的标签页，不归我们收）。
+ */
+export async function attachPage(conn, targetId, { owned = false } = {}) {
+  const { sessionId } = await conn.cdp.send('Target.attachToTarget', { targetId, flatten: true });
+  await conn.cdp.send('Page.enable', {}, sessionId);
+  await conn.cdp.send('Runtime.enable', {}, sessionId);
+  await conn.cdp.send('DOM.enable', {}, sessionId);
+  return new Page(conn.cdp, sessionId, targetId, conn.port, owned, /* ownsCdp */ false);
+}
+
+/** 找浏览器里已经打开的工作台首页标签页；没有则返回 null */
+export async function findHomepageTab(conn) {
+  const { targetInfos } = await conn.cdp.send('Target.getTargets');
+  return (targetInfos ?? [])
+    .find((t) => t.type === 'page' && isDoudianHomepageUrl(t.url)) ?? null;
+}
+
+export function classifyDoudianUrl(url = '') {
+  if (!/(jinritemai\.com|ecom\.douyin\.com)/i.test(url)) return 'other';
+  if (/(\/login|passport|\/authorize|\/account\/login)/i.test(url)) return 'login';
+  if (/^https?:\/\/[^/]+\/?(\?[^#]*)?(#.*)?$/.test(url)) return 'marketing';
+  return 'app';
+}
+
+/**
+ * 用页面文本做二次判定。只在 URL 已是 app 路径时才有意义——
+ * 用来抓「路径没变但弹了登录浮层 / 会话失效提示」这种情况。
+ */
+async function classifyByText(page) {
+  const t = await page.text().catch(() => '');
+  if (!t) return 'unknown';
+  if (/扫码登录|手机号登录|账号登录|密码登录|请先登录|登录已过期|重新登录/.test(t)) return 'login';
+  if (/工作台|商品管理|订单管理|商品创建|待办事项|上传主图|商品标题|发货中心/.test(t)) return 'app';
+  return 'unknown';
+}
+
+/**
+ * 只读地窥探当前所有 tab 的登录态（不新建 tab、不跑页面 JS）。
+ * 用于轮询等待登录：代价极低，可以每 2s 打一次。
+ * marketing（对外官网）不作为判据，直接忽略。
+ */
+export async function peekLoginByTabs(conn) {
+  const { targetInfos } = await conn.cdp.send('Target.getTargets');
+  const pages = (targetInfos ?? [])
+    .filter((t) => t.type === 'page')
+    .map((t) => ({ targetId: t.targetId, url: t.url, state: classifyDoudianUrl(t.url) }));
+  for (const want of ['app', 'login']) {
+    const hit = pages.find((p) => p.state === want);
+    if (hit) return { state: want, url: hit.url, targetId: hit.targetId };
+  }
+  const mk = pages.find((p) => p.state === 'marketing');
+  if (mk) return { state: 'marketing', url: mk.url, targetId: mk.targetId };
+  return { state: 'none' };
+}
+
+/**
+ * 权威登录态判定：把需要鉴权的后台首页真加载一次，看它最终落在登录页还是后台。
+ *
+ * 为何不只读已有 tab 的 URL 就下结论：那可能是几小时前的快照，会话早过期了。
+ * 只有真发一次导航，才知道 cookie 还有没有效。
+ *
+ * 标签页来源（reuseTab=true 时）：
+ *  1. 浏览器里已经开着工作台首页 → 直接接管那一页，就地重新加载。
+ *     既避免了每次跑都多开一个 tab，又保留了「真发一次导航」这层会话校验。
+ *  2. 没有 → 才新开一个 tab。
+ * 接管来的 tab owned=false，探测结束只 detach、绝不 close。
+ */
+export async function probeLogin(conn, {
+  timeoutMs = 30000, url = DOUDIAN_HOME, keepPage = false, reuseTab = true,
+} = {}) {
+  let page = null;
+  let adopted = false;
+
+  if (reuseTab && isDoudianHomepageUrl(url)) {
+    const hit = await findHomepageTab(conn).catch(() => null);
+    if (hit) {
+      page = await attachPage(conn, hit.targetId, { owned: false }).catch(() => null);
+      if (page) {
+        adopted = true;
+        await conn.cdp.send('Target.activateTarget', { targetId: hit.targetId }).catch(() => {});
+        // 就地重新加载：拿到的是当下的真实响应，而不是旧 DOM 快照。
+        // 走 safeNavigate 是因为这一页也可能被用户点进了带 beforeunload 的表单。
+        await page.safeNavigate(url).catch(() => {});
+      }
+    }
+  }
+  if (!page) page = await openPage(url, { conn });
+
+  let release = true;   // 探测结束要不要放手（adopted → detach，自建 → close）
   try {
-    await sleep(6000);
-    const u = await page.url();
-    const t = await page.text();
+    const start = Date.now();
+    let last = url;
+    while (Date.now() - start < timeoutMs) {
+      const u = await page.url().catch(() => '');
+      if (u) last = u;
+      const byUrl = classifyDoudianUrl(u);
+      if (byUrl === 'login') return { loggedIn: false, url: u, 依据: 'URL 落在登录页', 复用标签页: adopted };
+      if (byUrl === 'app') {
+        const byText = await classifyByText(page);
+        if (byText === 'login') return { loggedIn: false, url: u, 依据: '后台页面弹出登录', 复用标签页: adopted };
+        if (byText === 'app') {
+          release = !keepPage;
+          return {
+            loggedIn: true, url: u, 依据: '已进入后台工作台', 复用标签页: adopted,
+            ...(keepPage ? { page } : {}),
+          };
+        }
+      }
+      // marketing / other：还在跳转中，继续等
+      await sleepExact(800);
+    }
     return {
-      loggedIn: !/login|passport|登录/i.test(u) && /主图上传|商品标题/.test(t),
-      url: u,
+      loggedIn: false, url: last, 未定: true, 复用标签页: adopted,
+      依据: `${Math.round(timeoutMs / 1000)}s 内无法判定登录态`,
     };
   } finally {
-    await page.close();
+    if (release) {
+      if (adopted) {
+        // 用户的标签页只解除 attach，不关。反复轮询也不会攒下僵尸 session。
+        await conn.cdp.send('Target.detachFromTarget', { sessionId: page.sessionId }).catch(() => {});
+      } else {
+        await page.close().catch(() => {});
+      }
+    }
   }
+}
+
+/** 兼容旧调用名，等价于 probeLogin */
+export async function isLoggedIn(conn, opts) {
+  return await probeLogin(conn, opts);
+}
+
+/** 把登录页摆到用户眼前：已有登录 tab 就激活它，没有就新开一个前台 tab */
+export async function focusLoginTab(conn, url = DOUDIAN_LOGIN) {
+  let targetId;
+  try {
+    const { targetInfos } = await conn.cdp.send('Target.getTargets');
+    targetId = (targetInfos ?? [])
+      .find((t) => t.type === 'page' && classifyDoudianUrl(t.url) === 'login')?.targetId;
+  } catch {
+    /* 枚举失败就直接新开 */
+  }
+  if (!targetId) {
+    const r = await conn.cdp.send('Target.createTarget', { url, background: false });
+    targetId = r.targetId;
+  }
+  await conn.cdp.send('Target.activateTarget', { targetId }).catch(() => {});
+  // 顺手把浏览器窗口抬到前面，否则窗口在后台时用户看不到登录提示
+  try {
+    const { windowId } = await conn.cdp.send('Browser.getWindowForTarget', { targetId });
+    await conn.cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+  } catch {
+    /* 非致命 */
+  }
+  return targetId;
+}
+
+/**
+ * 确认登录态；未登录则打开登录页提示用户，并**轮询等待**登录完成，登录后自动继续。
+ *
+ * 设计约束（都是真实限制，别简化掉）：
+ *  - 脚本由 agent 非交互地调起，没有可读的 stdin，所以只能轮询、不能 prompt 等回车。
+ *  - 轮询用 peekLoginByTabs（只读 target URL），看到疑似已登录才做一次权威
+ *    probeLogin 确认，避免每 2s 开关一个标签页。
+ *  - 用户可能把登录 tab 关掉，所以发现没有任何抖店 tab 时会补开一个。
+ *  - reuseTab：浏览器里已开着工作台首页就直接接管，不再多开 tab（见 probeLogin）。
+ *
+ * @returns {{loggedIn:boolean, url?:string, waitedMs?:number, timeout?:boolean, 复用标签页?:boolean}}
+ */
+export async function ensureLogin(conn, {
+  wait = true, timeoutMs = 300000, pollMs = 2000, log = () => {},
+  keepPage = false, reuseTab = true,
+} = {}) {
+  const first = await probeLogin(conn, { keepPage, reuseTab });
+  if (first.loggedIn) {
+    log(`✓ 已登录抖店（${first.依据}${first.复用标签页 ? '，复用已打开的工作台标签页' : ''}），继续执行`);
+    return { ...first, waitedMs: 0 };
+  }
+  if (!wait) return { ...first, waitedMs: 0 };
+
+  await focusLoginTab(conn).catch(() => {});
+  log('');
+  log(`⚠ 未登录抖店（${first.依据}）。已在浏览器里打开登录页，请手动完成登录（扫码或账号密码）。`);
+  log(`  登录页: ${DOUDIAN_LOGIN}`);
+  log(`  登录完成后不用重跑命令，脚本会自动检测到并继续。最长等待 ${Math.round(timeoutMs / 1000)}s。`);
+
+  const start = Date.now();
+  let announced = 0;
+  let lastUrl = first.url;
+  while (Date.now() - start < timeoutMs) {
+    await sleepExact(pollMs);
+    const peek = await peekLoginByTabs(conn).catch(() => ({ state: 'none' }));
+    if (peek.url) lastUrl = peek.url;
+    if (peek.state === 'app') {
+      const st = await probeLogin(conn, { keepPage, reuseTab });
+      if (st.loggedIn) {
+        const waitedMs = Date.now() - start;
+        log(`✓ 检测到登录完成（等待 ${Math.round(waitedMs / 1000)}s${st.复用标签页 ? '，复用已打开的工作台标签页' : ''}），继续执行`);
+        return { ...st, waitedMs };
+      }
+    } else if (peek.state === 'none') {
+      await focusLoginTab(conn).catch(() => {});   // 登录 tab 被关了，补回来
+    }
+    const waited = Math.round((Date.now() - start) / 1000);
+    if (waited - announced >= 30) {
+      announced = waited;
+      log(`  … 仍在等待登录（已等 ${waited}s，当前页面 ${lastUrl || '未知'}）`);
+    }
+  }
+  log(`✗ 等待登录超时（${Math.round(timeoutMs / 1000)}s）。`);
+  return { loggedIn: false, url: lastUrl, timeout: true, waitedMs: Date.now() - start };
 }
 
 /** 仅判断端口可用性（环境检查用）。会占用并立即释放连接。 */
@@ -492,7 +738,7 @@ export async function findDebugPort(explicit) {
   const conn = await connectBrowser(explicit);
   if (!conn) return null;
   conn.cdp.close();
-  await sleep(300);
+  await sleepExact(300);
   return conn.port;
 }
 
@@ -626,19 +872,28 @@ export async function openPage(url, { port, conn, background = false } = {}) {
   return page;
 }
 
-/** attach 到已存在的 tab（URL 子串匹配），用于人工接手后续继续操作 */
-export async function attachPage(urlPart, { port, conn } = {}) {
+/**
+ * 拿一个落在 url 的可操作页：能复用浏览器里已打开的工作台首页就复用，否则新开 tab。
+ *
+ * 与 probeLogin 里的复用逻辑同源，供「登录探针之外」的场景用（例如某款失败后
+ * 需要重新拿一个干净的工作台页继续跑下一款）。复用来的页 owned=false，
+ * close() 对它是空操作，不会关掉用户自己的标签页。
+ */
+export async function openOrAdoptPage(url, { conn, port } = {}) {
   const c = conn ?? await connectBrowser(port);
   if (!c) throw new Error(browserOpenHint());
-  const { cdp } = c;
-  const { targetInfos } = await cdp.send('Target.getTargets');
-  const hit = targetInfos.find((t) => t.type === 'page' && t.url.includes(urlPart));
-  if (!hit) throw new Error(`未找到包含 "${urlPart}" 的标签页`);
-  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: hit.targetId, flatten: true });
-  await cdp.send('Page.enable', {}, sessionId);
-  await cdp.send('Runtime.enable', {}, sessionId);
-  await cdp.send('DOM.enable', {}, sessionId);
-  return new Page(cdp, sessionId, hit.targetId, c.port, /* owned */ false, /* ownsCdp */ !conn);
+  if (isDoudianHomepageUrl(url)) {
+    const hit = await findHomepageTab(c).catch(() => null);
+    if (hit) {
+      const page = await attachPage(c, hit.targetId, { owned: false }).catch(() => null);
+      if (page) {
+        await c.cdp.send('Target.activateTarget', { targetId: hit.targetId }).catch(() => {});
+        await page.safeNavigate(url).catch(() => {});
+        return page;
+      }
+    }
+  }
+  return await openPage(url, { conn: c });
 }
 
 export class Page {
@@ -683,12 +938,34 @@ export class Page {
     await this.waitReady();
   }
 
+  /**
+   * 带 beforeunload 防护的导航。
+   *
+   * 离开已填写的发布页（例如回工作台再建下一款）会触发「离开站点？」原生确认框，
+   * 跟 close() 里踩过的是同一个坑：那个框由浏览器 UI 线程持有，没人点就把主线程
+   * 卡死，DevTools 端口也不再响应。所以跳转前同样要双保险。
+   */
+  async safeNavigate(url) {
+    await this.disarmBeforeUnload().catch(() => {});
+    const autoAccept = (msg) => {
+      if (msg?.method === 'Page.javascriptDialogOpening') {
+        this.cdp.send('Page.handleJavaScriptDialog', { accept: true }, this.sessionId).catch(() => {});
+      }
+    };
+    this.cdp.onEvent(autoAccept);
+    try {
+      await this.navigate(url);
+    } finally {
+      this.cdp.offEvent(autoAccept);
+    }
+  }
+
   async waitReady(timeoutMs = 30000) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       const state = await this.evalExpr('document.readyState').catch(() => null);
       if (state === 'complete' || state === 'interactive') return;
-      await sleep(300);
+      await sleepExact(300);
     }
     throw new Error('页面加载超时');
   }
@@ -700,15 +977,18 @@ export class Page {
    * 此时 body.innerText 可能只有几十个字符（浏览器扩展的残留文本），表单还不存在。
    * 直接找元素会报「等待超时」——这是踩过的坑。
    */
-  async waitRendered({ timeoutMs = 60000, minTextLen = 200 } = {}) {
+  async waitRendered({ timeoutMs = 60000, minTextLen = 120, readyExpr = null } = {}) {
     await this.waitReady(timeoutMs).catch(() => {});
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       const len = await this.evalExpr('document.body ? document.body.innerText.length : 0').catch(() => 0);
-      if (len >= minTextLen) return len;
-      await sleep(500);
+      const semanticReady = readyExpr
+        ? await this.eval(readyExpr).catch(() => false)
+        : false;
+      if (semanticReady || len >= minTextLen) return len;
+      await sleepExact(500);
     }
-    throw new Error(`SPA 渲染超时（页面文本长度始终 < ${minTextLen}）`);
+    throw new Error(`SPA 渲染超时（关键控件未出现，且页面文本长度 < ${minTextLen}）`);
   }
 
   /** 轮询等待条件成立。cond 是一段返回 boolean 的 JS 语句体 */
@@ -717,7 +997,7 @@ export class Page {
     while (Date.now() - start < timeoutMs) {
       const ok = await this.eval(cond).catch(() => false);
       if (ok) return true;
-      await sleep(interval);
+      await sleepExact(interval);
     }
     throw new Error(`等待超时: ${label}`);
   }
@@ -725,6 +1005,11 @@ export class Page {
   /**
    * 真实鼠标点击。抖店的 ecom-g-select 下拉必须靠真实手势才会展开，
    * 纯 el.click() 无效——这是踩过的坑。
+   *
+   * 拟人化处理（不影响命中，只影响手势特征）：
+   *  - 落点在元素中心附近随机微偏，不总是精确正中心
+   *  - 移动分几步逼近，而不是一次瞬移到位
+   *  - 按下与松开之间有随机停留（真人按键时长）
    */
   async clickReal(selector) {
     const pos = await this.eval(`
@@ -733,24 +1018,52 @@ export class Page {
       el.scrollIntoView({ block: 'center' });
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) return null;
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2, inView: r.y > 0 && r.y < innerHeight };
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height,
+               inView: r.y > 0 && r.y < innerHeight };
     `);
     if (!pos) throw new Error(`元素不可见或不存在: ${selector}`);
     if (!pos.inView) {
-      await sleep(300);
+      await sleepExact(300);
       const again = await this.eval(`
         const el = document.querySelector(${JSON.stringify(selector)});
         const r = el.getBoundingClientRect();
-        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height };
       `);
       Object.assign(pos, again);
     }
-    for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+
+    // 落点微偏：限在元素尺寸 1/4 以内且不超过 4px，保证仍然落在元素上
+    const off = (size) => {
+      const lim = Math.min(4, Math.max(0, (size ?? 0) / 4 - 1));
+      return lim > 0 ? (Math.random() * 2 - 1) * lim : 0;
+    };
+    const tx = pos.x + off(pos.w);
+    const ty = pos.y + off(pos.h);
+
+    // 分几步移动过去。起点取目标左上方一点，模拟指针接近的过程。
+    const steps = 3 + Math.floor(Math.random() * 3);
+    const fromX = tx - 12 - Math.random() * 20;
+    const fromY = ty - 8 - Math.random() * 16;
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
       await this.cdp.send('Input.dispatchMouseEvent', {
-        type, x: pos.x, y: pos.y, button: 'left', clickCount: type === 'mouseMoved' ? 0 : 1,
-      }, this.sessionId);
-      await sleep(40);
+        type: 'mouseMoved',
+        x: fromX + (tx - fromX) * t,
+        y: fromY + (ty - fromY) * t,
+        button: 'none',
+        clickCount: 0,
+      }, this.sessionId).catch(() => undefined);
+      await sleepExact(15 + Math.floor(Math.random() * 30));
     }
+
+    await this.cdp.send('Input.dispatchMouseEvent', {
+      type: 'mousePressed', x: tx, y: ty, button: 'left', clickCount: 1,
+    }, this.sessionId);
+    await sleepExact(50 + Math.floor(Math.random() * 70));
+    await this.cdp.send('Input.dispatchMouseEvent', {
+      type: 'mouseReleased', x: tx, y: ty, button: 'left', clickCount: 1,
+    }, this.sessionId);
+    await sleepExact(40);
   }
 
   /** JS 点击，适用于普通按钮/链接 */
@@ -868,12 +1181,12 @@ export async function listTabs({ port } = {}) {
   }
 }
 
-/** 判断 python3 + openpyxl 是否可用（Excel 解析依赖） */
+/** 判断 Python 的 Excel 与图片处理依赖是否可用。 */
 export function checkPython() {
   try {
-    execFileSync('python3', ['-c', 'import openpyxl'], { stdio: 'pipe' });
+    execFileSync('python3', ['-c', 'import openpyxl, PIL'], { stdio: 'pipe' });
     return { ok: true };
   } catch (e) {
-    return { ok: false, hint: 'pip3 install openpyxl' };
+    return { ok: false, hint: 'pip3 install openpyxl Pillow' };
   }
 }

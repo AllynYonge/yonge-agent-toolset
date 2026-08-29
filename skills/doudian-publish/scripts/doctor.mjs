@@ -8,6 +8,7 @@
  * 用法:
  *   node doctor.mjs [--launch | --port <n>] [--shot doctor.png] [--json]
  *                   [--image <主图路径>] [--deep]
+ *                   [--no-wait-login] [--login-timeout <秒>]
  *
  * 分级说明（很重要）：
  *   空白发布页上，类目区、第二步页、规格区、SKU 表**根本不存在**，
@@ -20,8 +21,8 @@
  *   从而覆盖到 SKU 表。**全程不提交、不保存草稿**，跑完关掉标签页即弃。
  */
 import {
-  openPage, connectBrowser, launchDedicated, findExistingDebugPort,
-  browserOpenHint, isLoggedIn, sleep,
+  openOrAdoptPage, connectBrowser, launchDedicated, findExistingDebugPort,
+  browserOpenHint, ensureLogin, sleep, DOUDIAN_HOME,
 } from './cdp.mjs';
 import { SEL, candidates } from './selectors.mjs';
 import * as dp from './doudian-page.mjs';
@@ -34,6 +35,9 @@ const opt = {
   port: argv.includes('--port') ? argv[argv.indexOf('--port') + 1] : undefined,
   shot: argv.includes('--shot') ? argv[argv.indexOf('--shot') + 1] : undefined,
   image: argv.includes('--image') ? argv[argv.indexOf('--image') + 1] : undefined,
+  noWaitLogin: argv.includes('--no-wait-login'),
+  loginTimeout: argv.includes('--login-timeout')
+    ? argv[argv.indexOf('--login-timeout') + 1] : undefined,
 };
 
 async function connect() {
@@ -43,7 +47,7 @@ async function connect() {
     return c;
   }
   if (opt.launch) {
-    const r = await launchDedicated({ url: 'https://fxg.jinritemai.com/login/common' });
+    const r = await launchDedicated({ url: DOUDIAN_HOME });
     return { port: r.port, cdp: r.cdp };
   }
   const own = await findExistingDebugPort();
@@ -73,6 +77,7 @@ async function probe(page, key) {
     note: SEL[key].note,
     stage: SEL[key].stage,
     needs: SEL[key].needs ?? null,
+    soft: !!SEL[key].soft,
     ok: !!hit,
     // 命中的是不是首选（hash）；命中 alt 说明哈希已变，该更新常量表了
     viaFallback: !!hit && hit.sel !== list[0],
@@ -87,21 +92,40 @@ async function main() {
 
   // 先确认登录态。不先查的话，openCreatePage 会报「等待超时: 发布页首图上传控件」，
   // 让人误以为是选择器失效，实际只是没登录——这两种原因必须分开报。
-  const st = await isLoggedIn(conn).catch((e) => ({ loggedIn: false, url: `检测失败: ${e.message}` }));
+  // 未登录时打开登录页并等待，用户登录完自动继续体检。
+  const loginTimeoutMs = Number.parseInt(opt.loginTimeout ?? '', 10) > 0
+    ? Number.parseInt(opt.loginTimeout, 10) * 1000
+    : 300000;
+  const st = await ensureLogin(conn, {
+    wait: !opt.noWaitLogin,
+    timeoutMs: loginTimeoutMs,
+    // 保留探针的工作台标签页，供 openCreatePage 走「工作台 → 发布页」站内跳转
+    keepPage: true,
+    // --json 模式下日志走 stderr，别污染 stdout 的 JSON
+    log: (m) => (opt.json ? console.error(m) : console.log(m)),
+  }).catch((e) => ({ loggedIn: false, url: `检测失败: ${e.message}` }));
   if (!st.loggedIn) {
     console.error('未登录抖店，无法体检选择器。');
-    console.error(`当前页面: ${st.url}`);
+    console.error(`当前页面: ${st.url ?? '未知'}`);
     console.error('');
-    console.error('请在已打开的浏览器窗口里登录抖店，然后重跑。');
+    console.error(st.timeout
+      ? '等待登录超时。请在浏览器窗口里登录抖店，然后重跑。'
+      : '请在已打开的浏览器窗口里登录抖店，然后重跑。');
     conn.cdp.close();
     process.exit(2);
   }
 
-  const page = await dp.openCreatePage((u) => openPage(u, { conn }));
+  const page = await dp.openCreatePage(
+    (u) => openOrAdoptPage(u, { conn }),
+    st.page ?? null,
+    (m) => (opt.json ? console.error(m) : console.log(m)),
+  );
 
   // 已满足的前置条件集合。白页什么都没有。
   const met = new Set();
   const steps = [];
+  // AI 标题路径的实际结果（弹层用完即关，只能当时判，不能事后探）
+  let aiPath = null;
 
   try {
     if (opt.image) {
@@ -110,11 +134,30 @@ async function main() {
       await sleep(4000);
       met.add('image');
 
+      // 主路径：点标题框右侧 AI 按钮 → 选第一条推荐 → 平台自动填类目。
+      // 弹层选完就关了，事后无法再用选择器探 aiTitleOption，
+      // 所以它的通/不通以这里的回报为准（needs: 'ai-live' 永不满足，在表里总显「跳过」）。
+      steps.push('点 AI 标题');
+      const ai = await dp.aiTitleAndCategory(page).catch(() => null);
+      if (ai) {
+        steps.push(`AI 推荐命中（${ai.via}）`);
+        if (!opt.json) {
+          console.log(`  ✓ AI 标题路径走通（按钮定位: ${ai.via}）`);
+          console.log(`    AI 标题: ${ai.title}`);
+          console.log(`    自动类目: ${ai.category.replace(/\n/g, ' ')}`);
+        }
+      } else if (!opt.json) {
+        console.log('  ✗ AI 标题/自动类目未走通，改用手填标题验类目区（上架时也会这样回退）');
+      }
+      aiPath = ai ? { ok: true, ...ai } : { ok: false };
+
       // 类目区要等标题填完、平台跑完 AI 识别才出现；
       // 「最近创建」快捷项还要再点开「手动选择类目」弹层才存在。
-      steps.push('填标题');
-      await dp.fillTitle(page, '体检用标题聚酯纤维时尚套装女两件套通勤百搭');
-      await sleep(5000);
+      if (!ai) {
+        steps.push('填标题');
+        await dp.fillTitle(page, '体检用标题聚酯纤维时尚套装女两件套通勤百搭');
+        await sleep(5000);
+      }
       const opened = await page.eval(`
         const s = [...document.querySelectorAll('span')]
           .find(e => e.children.length === 0 && e.innerText.trim() === '手动选择类目');
@@ -171,7 +214,9 @@ async function main() {
 
   const checked = results.filter((r) => !r.skipped);
   const skipped = results.filter((r) => r.skipped);
-  const broken = checked.filter((r) => !r.ok);
+  // soft 项有几何/文案兜底路径，未命中只是提醒，不算失效（不影响退出码）
+  const broken = checked.filter((r) => !r.ok && !r.soft);
+  const softMiss = checked.filter((r) => !r.ok && r.soft);
   const stale = checked.filter((r) => r.viaFallback);
 
   if (opt.json) {
@@ -179,7 +224,9 @@ async function main() {
       时间: new Date().toISOString(),
       已满足前置: [...met],
       推进步骤: steps,
+      AI标题路径: aiPath,
       失效: broken.map((b) => b.key),
+      软失效: softMiss.map((b) => b.key),
       哈希已变: stale.map((s) => ({ key: s.key, 命中: s.hitSel })),
       跳过: skipped.map((s) => ({ key: s.key, 需要: s.needs })),
       明细: results,
@@ -188,12 +235,17 @@ async function main() {
     console.log(`选择器体检${steps.length ? `（已推进: ${steps.join(' → ')}）` : '（白页，仅验基础项）'}\n`);
     for (const r of results) {
       if (r.skipped) {
-        console.log(`- ${r.key.padEnd(22)} 跳过（需要「${r.needs}」状态）`);
+        const why = ['ai-live', 'style-live'].includes(r.needs)
+          ? '跳过（弹层用完即关，事后探不到；风格面板同理）'
+          : `跳过（需要「${r.needs}」状态）`;
+        console.log(`- ${r.key.padEnd(22)} ${why}`);
         continue;
       }
       const mark = !r.ok ? '✗' : r.viaFallback ? '·' : '✓';
       const tail = !r.ok
-        ? '全部候选均未命中'
+        ? (r.soft
+          ? '全部候选均未命中（该项有几何兜底，不算失效）'
+          : '全部候选均未命中')
         : r.viaFallback
           ? `命中兜底 ${r.hitSel}（哈希已变，请更新 selectors.mjs）`
           : `${r.count} 个`;
@@ -203,9 +255,15 @@ async function main() {
     }
 
     console.log('');
-    console.log(`已验 ${checked.length} 项：命中 ${checked.length - broken.length}`
+    console.log(`已验 ${checked.length} 项：命中 ${checked.length - broken.length - softMiss.length}`
       + (stale.length ? `（其中 ${stale.length} 条走兜底）` : '')
+      + (softMiss.length ? `，软失效 ${softMiss.length}（走几何兜底）` : '')
       + (broken.length ? `，失效 ${broken.length}` : ''));
+    if (aiPath) {
+      console.log(aiPath.ok
+        ? `AI 标题路径: 走通（按钮定位 ${aiPath.via}，类目已自动填充）`
+        : 'AI 标题路径: 未走通（上架时会回退到手填标题 + 手动选类目）');
+    }
     if (skipped.length) {
       console.log(`跳过 ${skipped.length} 项：前置条件未满足`);
       const needImage = skipped.filter((s) => s.needs === 'image').length;
@@ -223,9 +281,14 @@ async function main() {
     }
     if (opt.shot) console.log(`截图: ${opt.shot}`);
     console.log('');
-    console.log('本次未提交、未保存草稿。标签页已关闭。');
+    console.log(page.owned
+      ? '本次未提交、未保存草稿。标签页已关闭。'
+      : '本次未提交、未保存草稿。复用的是你已打开的工作台标签页，已退回工作台、不关闭。');
   }
 
+  // 接管来的标签页（owned=false）不关，但要把它从发布页退回工作台，
+  // 别给用户留一个填了半截内容的发布页。
+  if (!page.owned) await page.safeNavigate(DOUDIAN_HOME).catch(() => {});
   await page.close().catch(() => {});
   conn.cdp.close();
   process.exit(broken.length ? 1 : 0);

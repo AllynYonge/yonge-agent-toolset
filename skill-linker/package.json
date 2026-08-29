@@ -9,7 +9,7 @@
   "files": [
     "dist/src",
     "README.md",
-    "skill-linker.config.example.jsonc"
+    "linker.config.example.jsonc"
   ],
   "engines": {
     "node": ">=20"

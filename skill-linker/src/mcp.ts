@@ -27,6 +27,14 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+function validateStartupTimeout(raw: unknown): string | undefined {
+  if (typeof raw !== "number" || !Number.isSafeInteger(raw) || raw <= 0) {
+    return "startup_timeout_sec must be a positive integer";
+  }
+
+  return undefined;
+}
+
 function validateMcpServer(name: string, raw: unknown): McpServerConfig | string {
   if (!MCP_NAME_PATTERN.test(name)) {
     return "service name may contain only letters, numbers, hyphens, and underscores";
@@ -47,11 +55,21 @@ function validateMcpServer(name: string, raw: unknown): McpServerConfig | string
       return "local server env must contain only string values";
     }
 
+    const startupTimeoutProblem = raw.startup_timeout_sec === undefined
+      ? undefined
+      : validateStartupTimeout(raw.startup_timeout_sec);
+    if (startupTimeoutProblem !== undefined) {
+      return startupTimeoutProblem;
+    }
+
     return {
       type: "local",
       command: raw.command,
       ...(raw.args === undefined ? {} : { args: raw.args as string[] }),
       ...(raw.env === undefined ? {} : { env: raw.env as Record<string, string> }),
+      ...(raw.startup_timeout_sec === undefined
+        ? {}
+        : { startup_timeout_sec: raw.startup_timeout_sec as number }),
     };
   }
 
@@ -63,10 +81,20 @@ function validateMcpServer(name: string, raw: unknown): McpServerConfig | string
       return "remote server headers must contain only string values";
     }
 
+    const startupTimeoutProblem = raw.startup_timeout_sec === undefined
+      ? undefined
+      : validateStartupTimeout(raw.startup_timeout_sec);
+    if (startupTimeoutProblem !== undefined) {
+      return startupTimeoutProblem;
+    }
+
     return {
       type: "remote",
       url: raw.url,
       ...(raw.headers === undefined ? {} : { headers: raw.headers as Record<string, string> }),
+      ...(raw.startup_timeout_sec === undefined
+        ? {}
+        : { startup_timeout_sec: raw.startup_timeout_sec as number }),
     };
   }
 
@@ -114,6 +142,9 @@ function toOpenCodeConfig(server: McpServerConfig): Record<string, unknown> {
       type: "local",
       command: [server.command, ...(server.args ?? [])],
       ...(server.env === undefined ? {} : { environment: server.env }),
+      ...(server.startup_timeout_sec === undefined
+        ? {}
+        : { timeout: server.startup_timeout_sec * 1000 }),
     };
   }
 
@@ -121,21 +152,30 @@ function toOpenCodeConfig(server: McpServerConfig): Record<string, unknown> {
     type: "remote",
     url: server.url,
     ...(server.headers === undefined ? {} : { headers: server.headers }),
+    ...(server.startup_timeout_sec === undefined
+      ? {}
+      : { timeout: server.startup_timeout_sec * 1000 }),
   };
 }
 
 function toCodexConfig(server: McpServerConfig): Record<string, unknown> {
+  const startupTimeout = server.startup_timeout_sec === undefined
+    ? {}
+    : { startup_timeout_sec: server.startup_timeout_sec };
+
   if (server.type === "local") {
     return {
       command: server.command,
       ...(server.args === undefined ? {} : { args: server.args }),
       ...(server.env === undefined ? {} : { env: server.env }),
+      ...startupTimeout,
     };
   }
 
   return {
     url: server.url,
     ...(server.headers === undefined ? {} : { http_headers: server.headers }),
+    ...startupTimeout,
   };
 }
 

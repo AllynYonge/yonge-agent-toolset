@@ -95,6 +95,63 @@ describe("MCP configuration writing", () => {
     });
   });
 
+  it("maps startup_timeout_sec per platform and validates positive integers", async () => {
+    const root = await makeWorkspace();
+
+    const result = await writeMcpServers(
+      {
+        slow: {
+          type: "local",
+          command: "npx",
+          args: ["-y", "mcp-remote", "https://example.com/sse"],
+          startup_timeout_sec: 120,
+        },
+        remoteSlow: {
+          type: "remote",
+          url: "https://example.com/mcp",
+          startup_timeout_sec: 30,
+        },
+      },
+      root,
+      ["codex", "claude", "agents"],
+    );
+
+    assert.equal(result.warnings.length, 0);
+
+    const codex = parseToml(
+      await readFile(join(root, ".codex", "config.toml"), "utf8"),
+    ) as { mcp_servers: Record<string, { startup_timeout_sec?: number }> };
+    assert.equal(codex.mcp_servers.slow?.startup_timeout_sec, 120);
+    assert.equal(codex.mcp_servers.remoteSlow?.startup_timeout_sec, 30);
+
+    const claude = JSON.parse(await readFile(join(root, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    assert.equal("timeout" in claude.mcpServers.slow!, false);
+    assert.equal("startup_timeout_sec" in claude.mcpServers.slow!, false);
+    assert.equal("timeout" in claude.mcpServers.remoteSlow!, false);
+
+    const openCode = JSON.parse(await readFile(join(root, "opencode.json"), "utf8")) as {
+      mcp: Record<string, { timeout?: number }>;
+    };
+    assert.equal(openCode.mcp.slow?.timeout, 120000);
+    assert.equal(openCode.mcp.remoteSlow?.timeout, 30000);
+
+    const invalid = await writeMcpServers(
+      {
+        zero: { type: "remote", url: "https://example.com", startup_timeout_sec: 0 },
+        decimal: { type: "remote", url: "https://example.com", startup_timeout_sec: 1.5 },
+        string: { type: "remote", url: "https://example.com", startup_timeout_sec: "120" },
+      },
+      root,
+      ["codex"],
+    );
+
+    assert.equal(invalid.written.length, 0);
+    assert.equal(invalid.warnings.length, 3);
+    assert.match(invalid.warnings[0] ?? "", /startup_timeout_sec must be a positive integer/);
+  });
+
   it("merges existing configs and preserves unrelated Codex text", async () => {
     const root = await makeWorkspace();
     await mkdir(join(root, ".codex"), { recursive: true });
