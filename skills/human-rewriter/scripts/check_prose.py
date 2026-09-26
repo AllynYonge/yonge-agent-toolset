@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""检查中文成稿的硬禁令与常见模型化形状。只报警，不自动改文。"""
+"""检查中文成稿的硬禁令与常见模型化形状。只报警，不自动改文。
+
+默认只检查 SKILL.md 与 references/revision.md 写明的硬禁令和形状提醒，不读任何配置。
+传入 --profile、--extend、--length、--writing-style 或 --avoid-word 时，额外检查
+账号配置的篇幅与规避词（配置解析见 media_config.py）。
+"""
 
 from __future__ import annotations
 
 import argparse
 import collections
+import json
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -86,6 +93,13 @@ ROAD_SIGNS = (
 )
 
 ROAD_STRIP_CHARS = "。！？!? \n"
+
+# 平台信息标签：行首 emoji 或符号，加不超过六个字的标签，紧跟冒号，如“📍地址：”。
+# 只在 --platform-labels 打开时放行，规则见 SKILL.md「成稿绝对不能出现」的平台格式例外。
+PLATFORM_LABEL_PATTERN = re.compile(
+    r"^[ \t]*(?:[-*+]\s+)?[^\w\s，。！？、；：:（）《》“”‘’「」\[\]()#>`*+\-.]{1,3}\s*[\u4e00-\u9fffA-Za-z0-9]{1,6}[：:]",
+    re.MULTILINE,
+)
 
 FORBIDDEN_PUNCTUATION = {
     "：": "中文冒号",
@@ -445,9 +459,51 @@ def read_text(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
 
 
+def check_constraints(text: str, args: argparse.Namespace):
+    """按账号配置检查篇幅与规避词。未传配置参数时返回 None。"""
+    requested = (
+        args.profile or args.extend or args.length or args.writing_style or args.avoid_word
+    )
+    if not requested:
+        return None
+    from media_config import ConfigError, build_report, resolve_constraints
+
+    try:
+        constraints = resolve_constraints(
+            skill_root=args.skill_root,
+            extend_path=args.extend,
+            profile=args.profile,
+            explicit_length=args.length,
+            explicit_style=args.writing_style,
+            extra_avoid_words=args.avoid_word,
+        )
+    except (OSError, ConfigError) as error:
+        raise ValueError(f"配置解析失败。{error}") from error
+    return build_report(text, constraints)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="检查中文成稿的硬禁令与模型化形状")
     parser.add_argument("path", help="Markdown 或文本文件路径。使用 - 从标准输入读取")
+    parser.add_argument(
+        "--platform-labels",
+        action="store_true",
+        help="放行行首 emoji 加短标签的平台信息冒号，如“📍地址：”",
+    )
+    config_group = parser.add_argument_group("账号配置的篇幅与规避词检查")
+    config_group.add_argument("--extend", help="EXTEND.md 路径，通常取 resolver 返回的 constraint_check_args")
+    config_group.add_argument("--profile", help="账号名")
+    config_group.add_argument("--length", help="本次覆盖的目标长度")
+    config_group.add_argument("--writing-style", help="本次覆盖的风格预设名")
+    config_group.add_argument(
+        "--avoid-word", action="append", default=[], help="本次追加的规避词，可重复"
+    )
+    config_group.add_argument(
+        "--skill-root",
+        default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        help="human-rewriter 技能根目录",
+    )
+    parser.add_argument("--json", action="store_true", help="输出 JSON")
     args = parser.parse_args()
 
     try:
@@ -455,6 +511,17 @@ def main() -> int:
     except (OSError, UnicodeError) as error:
         print(f"无法读取稿件。{error}", file=sys.stderr)
         return 2
+
+    try:
+        constraint_report = check_constraints(text, args)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+    label_spans = []
+    if args.platform_labels:
+        for match in PLATFORM_LABEL_PATTERN.finditer(text):
+            label_spans.append(match.end() - 1)
 
     prose = mask_non_prose(text)
     total_han = han_count(prose)
@@ -471,6 +538,8 @@ def main() -> int:
         if symbol in ("：", ":"):
             hard = []
             for match in matches:
+                if match.start() in label_spans:
+                    continue
                 tail = prose[match.end() : match.end() + 2].lstrip()
                 if tail[:1] in ("「", "『", "“", "‘", '"'):
                     quote_colons.append(match)
@@ -726,8 +795,13 @@ def main() -> int:
             f"聊天协作残留或引流号召，第 {line_number(text, position)} 行，{term}。删掉，或说清具体理由。"
         )
 
-    print(f"汉字数 {total_han}")
-    print(
+    if constraint_report is not None:
+        for issue in constraint_report["issues"]:
+            failures.append(issue["message"])
+        for issue in constraint_report["warnings"]:
+            warnings.append(issue["message"])
+
+    summary = (
         f"翻案句 {len(pivots)}，翻案腔变形 {len(semantic_pivots)}，"
         f"同构排比 {len(anaphoras)}，名词化 {len(nominalizations)}，"
         f"黑话 {len(jargon_matches)}，硬停词 {len(stop_matches)}，"
@@ -738,6 +812,33 @@ def main() -> int:
         f"翻译腔骨架 {len(translationese)}，空洞副词 {len(adverb_matches)}，"
         f"清单式开头 {len(list_openers)}，协作残留 {len(residue_matches)}"
     )
+
+    if args.json:
+        payload = {
+            "pass": not failures,
+            "han_count": total_han,
+            "failures": failures,
+            "warnings": warnings,
+        }
+        if constraint_report is not None:
+            payload["constraints"] = {
+                key: constraint_report[key]
+                for key in ("length", "avoid_words", "style_source", "active_profile")
+            }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 1 if failures else 0
+
+    print(f"汉字数 {total_han}")
+    if constraint_report is not None:
+        length = constraint_report["length"]
+        if length["status"] == "skipped":
+            print("篇幅未设目标，跳过")
+        else:
+            print(
+                f"篇幅 {length['visible_char_count']} 字（全部非空白字符），"
+                f"目标 {length['min']}-{length['max']}"
+            )
+    print(summary)
 
     if failures:
         print("\n需要修改")
@@ -753,7 +854,6 @@ def main() -> int:
         print("\n未发现这份检查器覆盖的问题。")
 
     return 1 if failures else 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
