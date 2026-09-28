@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "scys-mcp": {
+      "type": "http",
+      "url": "https://mcp.scys.com/shengcai-web/mcp",
+      "oauth": {
+        "clientId": "scys-claude-code"
+      }
+    }
+  }
+}

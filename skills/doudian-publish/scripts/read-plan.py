@@ -20,15 +20,18 @@
 「风格」不在模板里：上品时由 agent 看主图判定，通过 publish.mjs 的 `--styles <json>` 传入
 （见 SKILL.md Step 2.5）。判断靠视觉，本脚本不参与。
 
-「参考图」列支持两种写法：单元格内嵌图片（推荐），或填图片/目录路径（| 分隔）。
+「参考图」列支持三种写法：传统浮动图片、WPS DISPIMG 单元格图片，或填图片/目录路径（| 分隔）。
 内嵌图片会被导出到 <素材目录>/参考图/ 下（幂等，同内容跳过），这是本脚本唯一的
 写文件副作用。参考图仅供人工参考，不上传抖店。
 """
 import hashlib
 import json
 import os
+import posixpath
 import re
 import sys
+from zipfile import ZipFile
+from xml.etree import ElementTree as ET
 
 try:
     import openpyxl
@@ -110,6 +113,11 @@ def resolve_materials(mat_dir, spec_values):
         low = n.lower()
         stem = os.path.splitext(n)[0]
         if n.startswith("主图") and low.endswith(IMG_EXT):
+            # _3x4 是早期版本遗留的派生图（当时把辅助图传到完整表单页的「主图3:4」区）。
+            # 现在辅助图改在智能填写确认页的主图区上传，不再生成也不再使用它；
+            # 目录里残留的旧文件一律忽略，不计入 1:1 主图集合。
+            if stem.lower().endswith("_3x4"):
+                continue
             base = re.sub(r"_1x1$", "", stem, flags=re.IGNORECASE)
             if stem.lower().endswith("_1x1"):
                 normalized_main[base] = full
@@ -167,7 +175,7 @@ def resolve_materials(mat_dir, spec_values):
 
 
 def collect_embedded_images(ws):
-    """按 (行, 列) 收集单元格内嵌/浮动图片的二进制数据。
+    """按 (行, 列) 收集传统浮动图片的二进制数据。
 
     openpyxl 读到的图片挂在 worksheet._images 上，锚点 _from 是 0-based，
     这里统一转成 1-based，与 iter_rows 的行号对齐。
@@ -187,6 +195,185 @@ def collect_embedded_images(ws):
             ext = "jpg"
         buckets.setdefault((frm.row + 1, frm.col + 1), []).append((ext, data))
     return buckets
+
+
+# WPS 的「单元格内图片」不是 OOXML drawing，而是自定义的 cellimages.xml，
+# openpyxl 不会把它们放进 ws._images。单元格只保留一个 DISPIMG(ID, 1)
+# 公式，图片二进制则由 cellimages.xml -> cellimages.xml.rels -> xl/media 引用。
+_OOXML_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+_OOXML_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships"
+_DRAWING_REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_XDR_NS = "http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+_WPS_CELL_IMAGE_REL = "http://www.wps.cn/officeDocument/2020/cellImage"
+_DISPIMG_RE = re.compile(r"DISPIMG\s*\(\s*[\"']([^\"']+)[\"']", re.IGNORECASE)
+
+
+def _local_name(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+def _resolve_zip_target(source_part, target):
+    """按 OOXML 关系规则解析相对 part 路径。"""
+    if not target or target.startswith("#"):
+        return None
+    if target.startswith("/"):
+        return target.lstrip("/")
+    return posixpath.normpath(posixpath.join(posixpath.dirname(source_part), target))
+
+
+def _read_relationships(zf, rels_part, source_part):
+    """读取一个 .rels part，返回 Relationship Id -> ZIP part 路径。"""
+    try:
+        root = ET.fromstring(zf.read(rels_part))
+    except (KeyError, ET.ParseError):
+        return {}
+    out = {}
+    for rel in root.findall(f"{{{_PKG_REL}}}Relationship"):
+        if rel.attrib.get("TargetMode", "").lower() == "external":
+            continue
+        rid = rel.attrib.get("Id")
+        target = _resolve_zip_target(source_part, rel.attrib.get("Target", ""))
+        if rid and target:
+            out[rid] = target
+    return out
+
+
+def _sheet_part_for_name(zf, sheet_name):
+    """根据 Sheet 名找到其 worksheet XML part。"""
+    workbook_part = "xl/workbook.xml"
+    try:
+        workbook = ET.fromstring(zf.read(workbook_part))
+    except (KeyError, ET.ParseError):
+        return None
+    rels = _read_relationships(zf, "xl/_rels/workbook.xml.rels", workbook_part)
+    for sheet in workbook.findall(f"{{{_OOXML_MAIN}}}sheets/{{{_OOXML_MAIN}}}sheet"):
+        if sheet.attrib.get("name") != sheet_name:
+            continue
+        return rels.get(sheet.attrib.get(f"{{{_OOXML_REL}}}id"))
+    return None
+
+
+def _column_index(letters):
+    value = 0
+    for char in letters.upper():
+        value = value * 26 + ord(char) - ord("A") + 1
+    return value
+
+
+def _cell_ref(ref):
+    match = re.fullmatch(r"([A-Za-z]+)([0-9]+)", ref or "")
+    if not match:
+        return None
+    return int(match.group(2)), _column_index(match.group(1))
+
+
+def _wps_image_payloads(zf):
+    """返回 WPS cellImage 名称 -> (扩展名, 二进制)。"""
+    cellimages_part = "xl/cellimages.xml"
+    try:
+        root = ET.fromstring(zf.read(cellimages_part))
+    except (KeyError, ET.ParseError):
+        return {}
+
+    rel_targets = _read_relationships(
+        zf, "xl/_rels/cellimages.xml.rels", cellimages_part
+    )
+    payloads = {}
+    for cell_image in root.iter():
+        if _local_name(cell_image.tag) != "cellImage":
+            continue
+        c_nv_pr = next(
+            (node for node in cell_image.iter() if _local_name(node.tag) == "cNvPr"),
+            None,
+        )
+        blip = next(
+            (node for node in cell_image.iter() if _local_name(node.tag) == "blip"),
+            None,
+        )
+        if c_nv_pr is None or blip is None:
+            continue
+        name = c_nv_pr.attrib.get("name")
+        rid = blip.attrib.get(f"{{{_OOXML_REL}}}embed")
+        target = rel_targets.get(rid)
+        if not name or not target:
+            # r:link=external 或缺少关系时没有可导出的本地二进制。
+            continue
+        try:
+            data = zf.read(target)
+        except KeyError:
+            continue
+        ext = posixpath.splitext(target)[1].lstrip(".").lower() or "png"
+        if ext == "jpeg":
+            ext = "jpg"
+        payloads[name] = (ext, data)
+    return payloads
+
+
+def collect_wps_cell_images(xlsx, sheet_name):
+    """解析 WPS DISPIMG 单元格图片，返回 {(行, 列): [(ext, data), ...]}。
+
+    WPS 把图片放在工作簿级的 xl/cellimages.xml 中，位置不在图片 XML
+    内，而是由 worksheet XML 中的 DISPIMG("ID_...", 1) 单元格公式决定。
+    解析失败时返回空映射，由调用方把无法恢复的 DISPIMG 明确报告出来。
+    """
+    buckets = {}
+    try:
+        with ZipFile(xlsx) as zf:
+            sheet_part = _sheet_part_for_name(zf, sheet_name)
+            if not sheet_part:
+                return buckets
+            try:
+                sheet = ET.fromstring(zf.read(sheet_part))
+            except (KeyError, ET.ParseError):
+                return buckets
+            payloads = _wps_image_payloads(zf)
+            if not payloads:
+                return buckets
+
+            for cell in sheet.iter():
+                if _local_name(cell.tag) != "c":
+                    continue
+                coordinate = _cell_ref(cell.attrib.get("r"))
+                if coordinate is None:
+                    continue
+                formula = " ".join(
+                    text for text in (
+                        next((n.text or "" for n in cell if _local_name(n.tag) == "f"), ""),
+                        next((n.text or "" for n in cell if _local_name(n.tag) == "v"), ""),
+                    ) if text
+                )
+                match = _DISPIMG_RE.search(formula)
+                if not match:
+                    continue
+                payload = payloads.get(match.group(1))
+                if payload is not None:
+                    buckets.setdefault(coordinate, []).append(payload)
+    except (OSError, KeyError, ET.ParseError, ValueError):
+        return {}
+    return buckets
+
+
+def is_dispimg_formula(value):
+    return bool(_DISPIMG_RE.search(str(value or "")))
+
+
+def merge_image_buckets(*sources):
+    """合并浮动图和 WPS 图，并按单元格内二进制内容去重。"""
+    merged = {}
+    seen = {}
+    for source in sources:
+        for key, images in source.items():
+            bucket = merged.setdefault(key, [])
+            bucket_seen = seen.setdefault(key, set())
+            for ext, data in images:
+                digest = hashlib.sha1(data).digest()
+                if digest in bucket_seen:
+                    continue
+                bucket_seen.add(digest)
+                bucket.append((ext, data))
+    return merged
 
 
 def export_embedded_refs(code, images, mat_dir):
@@ -287,7 +474,12 @@ def main():
 
     headers = [norm_header(c.value) for c in ws[1]]
     idx = {h: i for i, h in enumerate(headers) if h}
-    embedded = collect_embedded_images(ws)
+    # 同时读取传统浮动图片和 WPS DISPIMG 单元格图片。后者不在
+    # openpyxl 的 ws._images 中，必须从 XLSX ZIP 的 cellimages.xml 恢复。
+    embedded = merge_image_buckets(
+        collect_embedded_images(ws),
+        collect_wps_cell_images(xlsx, ws.title),
+    )
 
     missing_cols = [c for c in REQUIRED if c not in idx]
     if missing_cols:
@@ -331,9 +523,17 @@ def main():
         # 参考图：优先用单元格内嵌图片，其次用列里手写的路径。
         ref_col = idx.get("参考图")
         ref_images = embedded.get((r, ref_col + 1), []) if ref_col is not None else []
+        ref_raw = cell(row, "参考图")
         ref_paths, ref_errors = export_embedded_refs(code, ref_images, mat_dir)
         if not ref_paths:
-            ref_paths, ref_errors = resolve_ref_paths(cell(row, "参考图"), root)
+            # DISPIMG 是图片引用，不是用户填写的文件路径；不要把公式文本
+            # 再送进路径解析器，否则会产生误导性的「路径不存在」错误。
+            if is_dispimg_formula(ref_raw):
+                ref_errors = [
+                    "检测到 WPS DISPIMG 单元格图片，但图片数据无法从 XLSX 中读取"
+                ]
+            else:
+                ref_paths, ref_errors = resolve_ref_paths(ref_raw, root)
         materials["参考图"] = ref_paths
 
         row_errors = list(asset_errors) + ref_errors

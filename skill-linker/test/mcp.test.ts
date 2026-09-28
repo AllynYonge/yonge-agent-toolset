@@ -77,17 +77,17 @@ describe("MCP configuration writing", () => {
       },
     });
 
-    const openCode = JSON.parse(await readFile(join(root, "opencode.json"), "utf8")) as Record<string, unknown>;
-    assert.deepEqual(openCode, {
-      $schema: "https://opencode.ai/config.json",
-      mcp: {
+    const agents = JSON.parse(await readFile(join(root, ".pi", "mcp.json"), "utf8")) as Record<string, unknown>;
+    assert.deepEqual(agents, {
+      mcpServers: {
         filesystem: {
-          type: "local",
-          command: ["npx", "-y", "@modelcontextprotocol/server-filesystem", "."],
-          environment: { API_KEY: "{env:API_KEY}" },
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@modelcontextprotocol/server-filesystem", "."],
+          env: { API_KEY: "{env:API_KEY}" },
         },
         context7: {
-          type: "remote",
+          type: "http",
           url: "https://mcp.context7.com/mcp",
           headers: { Authorization: "Bearer {env:CONTEXT7_TOKEN}" },
         },
@@ -131,11 +131,12 @@ describe("MCP configuration writing", () => {
     assert.equal("startup_timeout_sec" in claude.mcpServers.slow!, false);
     assert.equal("timeout" in claude.mcpServers.remoteSlow!, false);
 
-    const openCode = JSON.parse(await readFile(join(root, "opencode.json"), "utf8")) as {
-      mcp: Record<string, { timeout?: number }>;
+    const agents = JSON.parse(await readFile(join(root, ".pi", "mcp.json"), "utf8")) as {
+      mcpServers: Record<string, Record<string, unknown>>;
     };
-    assert.equal(openCode.mcp.slow?.timeout, 120000);
-    assert.equal(openCode.mcp.remoteSlow?.timeout, 30000);
+    assert.equal("timeout" in agents.mcpServers.slow!, false);
+    assert.equal("startup_timeout_sec" in agents.mcpServers.slow!, false);
+    assert.equal("timeout" in agents.mcpServers.remoteSlow!, false);
 
     const invalid = await writeMcpServers(
       {
@@ -150,6 +151,74 @@ describe("MCP configuration writing", () => {
     assert.equal(invalid.written.length, 0);
     assert.equal(invalid.warnings.length, 3);
     assert.match(invalid.warnings[0] ?? "", /startup_timeout_sec must be a positive integer/);
+  });
+
+  it("maps oauth clientId per platform and validates it", async () => {
+    const root = await makeWorkspace();
+
+    const result = await writeMcpServers(
+      {
+        scys: {
+          type: "remote",
+          url: "https://mcp.scys.com/shengcai-web/mcp",
+          oauth: { clientId: "scys-claude-code" },
+        },
+      },
+      root,
+      ["codex", "claude", "agents"],
+    );
+
+    assert.equal(result.warnings.length, 0);
+    assert.equal(result.written.length, 3);
+
+    const codex = parseToml(await readFile(join(root, ".codex", "config.toml"), "utf8")) as {
+      mcp_servers: Record<string, { oauth?: { client_id?: string } }>;
+    };
+    assert.equal(codex.mcp_servers.scys?.oauth?.client_id, "scys-claude-code");
+
+    const claude = JSON.parse(await readFile(join(root, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, { oauth?: { clientId?: string } }>;
+    };
+    assert.deepEqual(claude.mcpServers.scys?.oauth, { clientId: "scys-claude-code" });
+
+    const agents = JSON.parse(await readFile(join(root, ".pi", "mcp.json"), "utf8")) as {
+      mcpServers: Record<string, { oauth?: { clientId?: string } }>;
+    };
+    assert.deepEqual(agents.mcpServers.scys?.oauth, { clientId: "scys-claude-code" });
+  });
+
+  it("warns on invalid oauth and omits it from servers without oauth", async () => {
+    const root = await makeWorkspace();
+
+    const result = await writeMcpServers(
+      {
+        notAnObject: { type: "remote", url: "https://example.com", oauth: "client" },
+        missingClientId: { type: "remote", url: "https://example.com", oauth: {} },
+        emptyClientId: { type: "remote", url: "https://example.com", oauth: { clientId: "  " } },
+        unknownField: {
+          type: "remote",
+          url: "https://example.com",
+          oauth: { clientId: "a", client_id: "b" },
+        },
+        onLocal: { type: "local", command: "npx", oauth: { clientId: "a" } },
+        plain: { type: "remote", url: "https://example.com" },
+      },
+      root,
+      ["claude"],
+    );
+
+    assert.equal(result.warnings.length, 5);
+    assert.match(result.warnings[0] ?? "", /oauth must be an object/);
+    assert.match(result.warnings[1] ?? "", /non-empty "clientId"/);
+    assert.match(result.warnings[2] ?? "", /non-empty "clientId"/);
+    assert.match(result.warnings[3] ?? "", /oauth contains unknown field "client_id"/);
+    assert.match(result.warnings[4] ?? "", /oauth is only supported for remote servers/);
+
+    const claude = JSON.parse(await readFile(join(root, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    assert.deepEqual(Object.keys(claude.mcpServers), ["plain"]);
+    assert.equal("oauth" in claude.mcpServers.plain!, false);
   });
 
   it("merges existing configs and preserves unrelated Codex text", async () => {
@@ -173,9 +242,10 @@ describe("MCP configuration writing", () => {
       join(root, ".mcp.json"),
       JSON.stringify({ other: true, mcpServers: { keep: { command: "keep" } } }),
     );
+    await mkdir(join(root, ".pi"), { recursive: true });
     await writeFile(
-      join(root, "opencode.json"),
-      JSON.stringify({ model: "test", mcp: { servers: { keep: { type: "remote", url: "keep" } } } }),
+      join(root, ".pi", "mcp.json"),
+      JSON.stringify({ other: "pi", mcpServers: { keep: { type: "http", url: "keep" } } }),
     );
 
     await writeMcpServers({ filesystem: servers.filesystem }, root, ["codex", "claude", "agents"]);
@@ -194,12 +264,12 @@ describe("MCP configuration writing", () => {
     assert.equal(claude.other, true);
     assert.deepEqual(Object.keys(claude.mcpServers), ["keep", "filesystem"]);
 
-    const openCode = JSON.parse(await readFile(join(root, "opencode.json"), "utf8")) as {
-      model: string;
-      mcp: { servers: Record<string, unknown> };
+    const agents = JSON.parse(await readFile(join(root, ".pi", "mcp.json"), "utf8")) as {
+      other: string;
+      mcpServers: Record<string, unknown>;
     };
-    assert.equal(openCode.model, "test");
-    assert.deepEqual(Object.keys(openCode.mcp.servers), ["keep", "filesystem"]);
+    assert.equal(agents.other, "pi");
+    assert.deepEqual(Object.keys(agents.mcpServers), ["keep", "filesystem"]);
   });
 
   it("warns once per invalid service and still writes valid services", async () => {
@@ -239,6 +309,6 @@ describe("MCP configuration writing", () => {
     assert.deepEqual(result, { written: [], warnings: [] });
     await assert.rejects(readFile(join(root, ".codex", "config.toml")), { code: "ENOENT" });
     await assert.rejects(readFile(join(root, ".mcp.json")), { code: "ENOENT" });
-    await assert.rejects(readFile(join(root, "opencode.json")), { code: "ENOENT" });
+    await assert.rejects(readFile(join(root, ".pi", "mcp.json")), { code: "ENOENT" });
   });
 });

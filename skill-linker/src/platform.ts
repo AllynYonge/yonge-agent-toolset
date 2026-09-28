@@ -9,7 +9,7 @@ export const PLATFORM_DIRECTORIES = {
 export const PLATFORM_MCP_FILES = {
   codex: ".codex/config.toml",
   claude: ".mcp.json",
-  agents: "opencode.json",
+  agents: ".pi/mcp.json",
 } as const;
 
 export type Platform = keyof typeof PLATFORM_DIRECTORIES;

@@ -74,12 +74,24 @@ The `link` command accepts one or more modes. Modes are merged from left to righ
 | --- | --- | --- | --- |
 | `codex` | `.codex/skills` | `.codex/config.toml` | Project root `NAME` |
 | `claude` | `.claude/skills` | `.mcp.json` | `.claude/NAME` |
-| `agents` | `.agents/skills` | `opencode.json` | Project root `NAME` |
+| `agents` | `.agents/skills` | `.pi/mcp.json` | Project root `NAME` |
+
+The `agents` platform targets the tool-agnostic `.agents/skills` directory and Pi's project MCP override `.pi/mcp.json`, which takes precedence over `.mcp.json`.
 
 Links are created in platform `skills` directories under the current working directory. Existing symlinks with the same name are replaced. Existing files and directories are left untouched and skipped silently. Invalid source paths and MCP definitions are skipped with a warning on stderr.
 
 MCP configurations are merged by service name. Existing unrelated settings and MCP services are preserved; a configured service replaces an existing service with the same name. Environment variables and headers are written exactly as configured and are not expanded or printed.
 
-Both local and remote MCP entries accept an optional `startup_timeout_sec` positive integer. Codex writes it as `startup_timeout_sec` in seconds. OpenCode writes it as `timeout` in milliseconds (`startup_timeout_sec * 1000`). Claude Code ignores it because its project MCP config has no equivalent per-server startup timeout field.
+Both local and remote MCP entries accept an optional `startup_timeout_sec` positive integer. Codex writes it as `startup_timeout_sec` in seconds. Claude Code and the `agents` platform ignore it because neither target format has an equivalent per-server startup timeout field.
+
+Remote MCP entries accept an optional `oauth` object with a required non-empty `clientId` string, used to pin a pre-registered OAuth client instead of letting the platform register one dynamically. `oauth` is rejected on local servers. Each platform receives its own field spelling:
+
+| Platform | Written form |
+| --- | --- |
+| `codex` | `[mcp_servers.<name>.oauth]` with `client_id` |
+| `claude` | `"oauth": { "clientId": "..." }` |
+| `agents` | `"oauth": { "clientId": "..." }` |
+
+OAuth tokens are not part of the project configuration. Codex still requires a per-machine `codex mcp login <name>`, and Claude Code and Pi authenticate on their own. Codex also requires the project to be trusted before it reads project MCP configuration at all: the repository path must appear in `~/.codex/config.toml` as `[projects."<path>"]` with `trust_level = "trusted"`.
 
 Base instruction `PATH` values and destination conflicts are checked before any changes are made. If a selected `PATH` does not point to a file, or multiple selected base instructions resolve to the same destination, the command exits without writing SKILL, MCP, or base instruction changes. Existing base instruction symlinks are replaced; existing regular files or directories are kept and reported as warnings. Destination comparisons follow the current filesystem's casing behavior.

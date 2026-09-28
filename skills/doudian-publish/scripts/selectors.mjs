@@ -63,8 +63,8 @@ export const SEL = {
     stage: 'step1',
   },
   uploadedImageCount: {
-    hash: 'div.index-module_batchImageUpload__JtBRX img',
-    alt: ['div[class*=batchImageUpload] img'],
+    hash: 'div[class*=batchImageUpload] img',
+    alt: ['[class*=batchImageUpload] img'],
     note: '已上传主图计数用的 img',
     stage: 'step1',
     needs: 'image',
@@ -141,6 +141,12 @@ export const SEL = {
     needs: 'style-live',
     soft: true,
   },
+  // 热搜词推荐区块（点词追加进标题，标题余量不足时区块整体撤下）
+  // 故意不登记哈希：它有两层不依赖类名的稳定锚点——
+  //   ① [data-kora-exposure*="seo_word_expo"] 属性（属性值还自带推荐词全集 JSON）
+  //   ② 「热搜词推荐」可见文案
+  // 哈希（style_recomands__* 一族，同属一个 CSS Modules 文件）只会徒增
+  // doctor 发版后的假阳性，故运行时与清单都不用。同尺码面板先例。
 
   // ---------- 规格设置 ----------
   specSwitchButton: {

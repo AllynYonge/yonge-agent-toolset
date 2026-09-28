@@ -396,11 +396,11 @@ describe("CLI platform handling", () => {
     );
 
     assert.equal(exitCode, 0);
-    assert.match(stdout.text(), /MCP: context7 -> opencode\.json/);
-    const openCode = JSON.parse(await readFile(join(fixture.cwd, "opencode.json"), "utf8")) as {
-      mcp: Record<string, unknown>;
+    assert.match(stdout.text(), /MCP: context7 -> \.pi\/mcp\.json/);
+    const agents = JSON.parse(await readFile(join(fixture.cwd, ".pi", "mcp.json"), "utf8")) as {
+      mcpServers: Record<string, unknown>;
     };
-    assert.deepEqual(Object.keys(openCode.mcp), ["context7"]);
+    assert.deepEqual(Object.keys(agents.mcpServers), ["context7"]);
     await assert.rejects(lstat(join(fixture.cwd, ".mcp.json")), { code: "ENOENT" });
     await assert.rejects(lstat(join(fixture.cwd, ".codex")), { code: "ENOENT" });
   });

@@ -36,6 +36,8 @@ const API_URL =
   "https://ad.qq.com/ai/gw/ai_customer_service/v1/open_api/tool_call";
 const TOKEN_FILE = path.join(os.homedir(), ".MIAOWEN_ACCESS_TOKEN");
 const REQUEST_TIMEOUT_MS = 60 * 1000; // 1 分钟超时（结构化 API 响应较快）
+const SKILL_NAME = "tencent-ads-assistant";
+const SKILL_VERSION = "1.3.0"; // 须与 SKILL.md frontmatter 的 version 保持一致
 
 // ============ 参数检查 ============
 
@@ -121,8 +123,8 @@ async function main() {
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        "skill-name": "tencent-ads-assistant",
-        "skill-version": "1.2.0",
+        "skill-name": SKILL_NAME,
+        "skill-version": SKILL_VERSION,
       },
       body: jsonBody,
       signal: controller.signal,

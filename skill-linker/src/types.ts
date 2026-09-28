@@ -25,10 +25,15 @@ export interface LocalMcpServerConfig {
   startup_timeout_sec?: number;
 }
 
+export interface McpOAuthConfig {
+  clientId: string;
+}
+
 export interface RemoteMcpServerConfig {
   type: "remote";
   url: string;
   headers?: Record<string, string>;
+  oauth?: McpOAuthConfig;
   startup_timeout_sec?: number;
 }
 

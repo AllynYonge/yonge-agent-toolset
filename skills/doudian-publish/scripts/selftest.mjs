@@ -1005,10 +1005,13 @@ group('新增字段的行为契约');
   ok('风格未命中时回报该类目实际可选项',
     /该类目可选: availableWhenMissing/.test(src)
     && /missing\.length \? await collectOptions\(page\)/.test(src));
-  ok('收集全集仅在报错路径上跑（不是常规步骤）',
+  // 2026-08-30 设计变更：风格全集现在也是 pi 候选集的常规来源
+  //（getStyleCandidates，同一次流程内收集、无额外上传），所以允许第二处调用；
+  // 但报错路径的条件调用（missing.length ? ...）必须保留。
+  ok('收集全集：报错路径条件调用 + getStyleCandidates 各一处',
     /async function collectOptions/.test(src)
-    // 只应有一处调用，且它带着 missing.length 条件
-    && (src.match(/await collectOptions\(page\)/g) ?? []).length === 1);
+    && /missing\.length \? await collectOptions\(page\)/.test(src)
+    && /getStyleCandidates[\s\S]{0,2000}await collectOptions\(page\)/.test(src));
   ok('收集前先清搜索词（否则读到上一个关键词的过滤结果）',
     /async function collectOptions[\s\S]{0,600}set\.call\(i, ''\)/.test(src));
   ok('滚动终止看实际 scrollTop（不看未夹取的请求值）',
@@ -1263,6 +1266,74 @@ wb.save(${JSON.stringify(noRefCol)})
       { encoding: 'utf-8', stdio: 'pipe' });
   } catch (e) { colErr = e.stdout || ''; }
   ok('旧模板缺「参考图」列时明确报错', colErr.includes('模板缺少必需列') && colErr.includes('参考图'));
+
+  // WPS 单元格图片回归：openpyxl 的 ws._images 为空，但 XLSX ZIP 中有
+  // cellimages.xml + DISPIMG 公式，read-plan.py 必须能按单元格恢复图片。
+  const wpsXlsx = path.join(tmp, 'wps-cell-image.xlsx');
+  const wpsAssetDir = path.join(tmp, 'wps-assets', 'W1');
+  const wpsPy = `
+from pathlib import Path
+from zipfile import ZipFile, ZIP_DEFLATED
+from openpyxl import Workbook
+from PIL import Image
+
+out = ${JSON.stringify(wpsXlsx)}
+asset_dir = ${JSON.stringify(wpsAssetDir)}
+Path(asset_dir).mkdir(parents=True, exist_ok=True)
+Image.new('RGB', (200, 200), (255, 0, 0)).save(Path(asset_dir) / '主图01.jpg')
+
+wb = Workbook()
+ws = wb.active
+ws.title = '商品'
+ws.append(['款号', '参考图', '商品标题', '类目', '面料材质', '材质含量',
+           '素材目录', '规格组名', '规格值', '尺码', '价格', '库存'])
+ws.append(['W1', '=_xlfn.DISPIMG("ID_TEST",1)', '', '服装>女装>时尚套装',
+           '聚酯纤维', '', asset_dir, '颜色分类', '红', 'S', '红:10', 'S:1'])
+base = str(Path(out).with_suffix('.base.xlsx'))
+wb.save(base)
+
+with ZipFile(base) as zin:
+    files = {name: zin.read(name) for name in zin.namelist()}
+
+files['xl/media/wps-test.png'] = b'\\x89PNG\\r\\n\\x1a\\n' + b'WPS-TEST'
+files['xl/cellimages.xml'] = b'''<?xml version="1.0" encoding="UTF-8"?>
+<etc:cellImages xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing"
+ xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+ xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+ xmlns:etc="http://www.wps.cn/officeDocument/2017/etCustomData">
+ <etc:cellImage><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="1" name="ID_TEST"/></xdr:nvPicPr>
+ <xdr:blipFill><a:blip r:embed="rId1"/></xdr:blipFill></xdr:pic></etc:cellImage>
+</etc:cellImages>'''
+files['xl/_rels/cellimages.xml.rels'] = b'''<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/wps-test.png"/>
+</Relationships>'''
+rels = files['xl/_rels/workbook.xml.rels'].decode('utf-8')
+rels = rels.replace('</Relationships>', '<Relationship Id="rId99" Type="http://www.wps.cn/officeDocument/2020/cellImage" Target="cellimages.xml"/></Relationships>')
+files['xl/_rels/workbook.xml.rels'] = rels.encode('utf-8')
+ct = files['[Content_Types].xml'].decode('utf-8')
+ct = ct.replace('</Types>', '<Override PartName="/xl/cellimages.xml" ContentType="application/vnd.wps-officedocument.cellimage+xml"/></Types>')
+files['[Content_Types].xml'] = ct.encode('utf-8')
+
+with ZipFile(out, 'w', ZIP_DEFLATED) as zout:
+    for name, data in files.items():
+        zout.writestr(name, data)
+Path(base).unlink()
+`;
+  execFileSync('python3', ['-c', wpsPy], { stdio: 'pipe' });
+  const wpsPlan = JSON.parse(execFileSync(
+    'python3', [path.join(HERE, 'read-plan.py'), wpsXlsx], { encoding: 'utf-8' },
+  ));
+  const wpsItem = wpsPlan.items.find((it) => it.款号 === 'W1');
+  ok('WPS DISPIMG 单元格图片可被恢复并导出',
+    !!wpsItem && wpsItem.素材.参考图.length === 1
+      && fs.existsSync(wpsItem.素材.参考图[0])
+      && wpsPlan.errors.length === 0,
+    JSON.stringify(wpsPlan));
+  ok('WPS DISPIMG 不再被当作文件路径',
+    !JSON.stringify(wpsPlan).includes('参考图路径不存在或不是图片')
+      && !JSON.stringify(wpsPlan).includes('DISPIMG 单元格图片，但图片数据无法'),
+    JSON.stringify(wpsPlan.errors));
 }
 
 fs.rmSync(tmp, { recursive: true, force: true });

@@ -3,6 +3,7 @@
 
 只处理按命名规范识别的主图（主图01.* 至主图05.*），不猜测任意旧素材的用途。
 原图保留，规范化图片以 主图NN_1x1.jpg 写入同一素材目录，read-plan.py 会优先使用它。
+已是 1:1 的主图（jpg / png / jfif）一律不生成副本，直接使用原图。
 """
 import argparse
 import os
@@ -86,18 +87,27 @@ def normalize_directory(code, directory):
     changed = 0
     for base in sorted(sources, key=natural_key):
         source = sources[base]
-        output = os.path.join(directory, f"{base}_1x1.jpg")
+        stem, ext = os.path.splitext(os.path.basename(source))
+        # 已是 1:1 的直接跳过：避免无意义的重编码画质损失和重复文件，
+        # jpg / png / jfif 一视同仁，read-plan.py 会回退使用原图。
         try:
             with Image.open(source) as opened:
-                image = ImageOps.exif_transpose(opened).convert("RGB")
+                image = ImageOps.exif_transpose(opened)
                 width, height = image.size
-                side = min(width, height)
-                if width != height:
-                    left = (width - side) // 2
-                    top = (height - side) // 2
-                    image = image.crop((left, top, left + side, top + side))
-                # 即使原图已经是 1:1，jfif/png 也转成统一 jpg，保证上传格式稳定。
-                image.save(output, format="JPEG", quality=95, optimize=True)
+        except Exception as exc:
+            print(f"主图处理失败: {source}: {exc}", file=sys.stderr)
+            return -1
+        if width == height:
+            print(f"已是 1:1，跳过: {source}")
+            continue
+        output = os.path.join(directory, f"{base}_1x1.jpg")
+        try:
+            image = image.convert("RGB")
+            side = min(width, height)
+            left = (width - side) // 2
+            top = (height - side) // 2
+            image = image.crop((left, top, left + side, top + side))
+            image.save(output, format="JPEG", quality=95, optimize=True)
             changed += 1
             print(f"规范化主图: {source} -> {output}")
         except Exception as exc:

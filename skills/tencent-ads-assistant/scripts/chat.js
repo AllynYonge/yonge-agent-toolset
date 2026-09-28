@@ -36,7 +36,9 @@
 //   3. [RESULT_FILE]  — 结果超长时，完整内容已写入本地文件；其后给出文件路径与预览，
 //                       调用方须读取该文件获取完整内容（含全部超长媒体 URL）
 //   4. [TASK_INFO]    — JSON 格式的任务元信息
-//   5. [VERSION_EXPIRED] — SKILL 版本过期，需按提示更新后重试
+//   5. [FEEDBACK_IDS] — JSON 格式的会话 ID（session_id）/ 回复消息 ID（answer_message_id），
+//                       用户向妙问平台反馈问题时需提供
+//   6. [VERSION_EXPIRED] — SKILL 版本过期，需按提示更新后重试
 //
 
 const fs = require("fs");
@@ -49,7 +51,7 @@ const API_URL =
 const TOKEN_FILE = path.join(os.homedir(), ".MIAOWEN_ACCESS_TOKEN");
 const REQUEST_TIMEOUT_MS = 10 * 60 * 1000; // 10 分钟超时（流式接口处理时间较长）
 const SKILL_NAME = "tencent-ads-assistant";
-const SKILL_VERSION = "1.2.0";
+const SKILL_VERSION = "1.3.0";
 const VERSION_EXPIRED_CODE = 140209;
 
 // 结果超长自动落盘阈值（字符数）。超过时把完整结果写入本地文件，stdout 仅输出摘要 + 文件路径，
@@ -138,11 +140,59 @@ function safeJsonParse(str) {
 }
 
 /**
+ * 从对象中取指定字段的有效 ID（转为字符串）
+ */
+function pickId(obj, key) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+  const v = obj[key];
+  if (typeof v !== "string" && typeof v !== "number") return "";
+  const s = String(v).trim();
+  return s && s !== "0" ? s : "";
+}
+
+/**
+ * 采集反馈用 ID（用户向妙问平台反馈问题时需提供）：
+ *   - 会话 ID：字段 session_id，全程固定，取首次出现的值
+ *   - 回复消息 ID：字段 answer_message_id，多轮/多段推送时会有多个，以最后一个为准
+ * 字段可能挂在事件顶层，也可能在 data / agent_info 下，统一扫描避免漏采。
+ */
+function collectFeedbackIds(parsed, state) {
+  for (const src of [parsed, parsed.data, parsed.agent_info]) {
+    const sid = pickId(src, "session_id");
+    if (sid && !state.sessionId) {
+      state.sessionId = sid;
+      console.log(`[PROGRESS] 🆔 会话ID：${sid}`);
+    }
+    const mid = pickId(src, "answer_message_id");
+    if (mid && mid !== state.messageId) {
+      state.messageId = mid;
+      console.log(`[PROGRESS] 🆔 回复消息ID：${mid}`);
+    }
+  }
+}
+
+/**
+ * 输出反馈用 ID（供调用方在回复结尾注明）
+ */
+function emitFeedbackIds(state) {
+  if (!state.sessionId && !state.messageId) return;
+  console.log("");
+  console.log(
+    `[FEEDBACK_IDS] ${JSON.stringify({
+      session_id: state.sessionId || "",
+      answer_message_id: state.messageId || "",
+    })}`
+  );
+}
+
+/**
  * 处理单个 SSE 事件的 JSON 数据
  */
 function handleEvent(jsonData, state) {
   const parsed = safeJsonParse(jsonData);
   if (!parsed) return;
+
+  collectFeedbackIds(parsed, state);
 
   const eventType = parsed.event_type;
   const data = parsed.data;
@@ -434,8 +484,10 @@ function buildFallbackContent(state) {
  *   - 内容超阈值：完整写入本地文件，stdout 仅输出 [RESULT_FILE]（含预览片段 + 文件路径），
  *     由调用方读取该文件获取完整内容（含全部超长媒体 URL），规避命令输出被截断。
  * 写文件失败时降级为直接 stdout 输出，保证不丢内容。
+ * 结果之后统一输出 [FEEDBACK_IDS]（会话 ID / 回复消息 ID），供调用方在回复结尾注明。
  */
-function emitResult(content, taskInfo) {
+function emitResult(content, state) {
+  const taskInfo = state.taskInfo;
   const byteLen = Buffer.byteLength(content, "utf-8");
 
   if (content.length <= RESULT_INLINE_LIMIT) {
@@ -446,6 +498,7 @@ function emitResult(content, taskInfo) {
       console.log("");
       console.log(`[TASK_INFO] ${taskInfo}`);
     }
+    emitFeedbackIds(state);
     return;
   }
 
@@ -473,6 +526,7 @@ function emitResult(content, taskInfo) {
       console.log("");
       console.log(`[TASK_INFO] ${taskInfo}`);
     }
+    emitFeedbackIds(state);
     return;
   }
 
@@ -491,6 +545,7 @@ function emitResult(content, taskInfo) {
     console.log("");
     console.log(`[TASK_INFO] ${taskInfo}`);
   }
+  emitFeedbackIds(state);
 }
 
 // ============ 发起流式 API 请求 ============
@@ -520,6 +575,8 @@ async function main() {
     answering: false,
     needMoreInput: false,
     securityReplaced: false,
+    sessionId: "", // 妙问会话 ID（session_id，首次出现即固定），用户反馈问题时需提供
+    messageId: "", // 妙问回复消息 ID（answer_message_id，多轮时以最后一个为准）
   };
 
   let response;
@@ -636,7 +693,7 @@ async function main() {
 
   // 拿到了完整最终答案：正常输出（超长自动落盘）
   if (state.markdownContent) {
-    emitResult(state.markdownContent, state.taskInfo);
+    emitResult(state.markdownContent, state);
     process.exit(0);
   }
 
@@ -645,7 +702,7 @@ async function main() {
   if (fallback) {
     console.log("");
     console.log("[PROGRESS] ⚠️ 最终整合回答未完整返回，已用阶段性步骤结果兜底");
-    emitResult(fallback, state.taskInfo);
+    emitResult(fallback, state);
     process.exit(0);
   }
 
@@ -653,6 +710,7 @@ async function main() {
   if (state.hasError) {
     console.error("");
     console.error(`[API_ERROR] 流式问答过程中出现错误: ${state.errorMessage}`);
+    emitFeedbackIds(state);
     process.exit(4);
   }
 

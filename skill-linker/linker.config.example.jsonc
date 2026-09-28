@@ -28,8 +28,7 @@
 
           // 可选。等待 MCP 启动的秒数，必须是正整数。
           // Codex 原样写入 startup_timeout_sec；
-          // OpenCode 换算成 timeout 毫秒；
-          // Claude Code 忽略该字段。
+          // Claude Code 和 agents 平台忽略该字段。
           "startup_timeout_sec": 120,
         },
 
@@ -44,6 +43,11 @@
             "Authorization": "Bearer YOUR_TOKEN",
             "X-Client-Name": "skill-linker",
           },
+
+          // 可选。指定预注册的 OAuth 客户端，避免各平台各自动态注册一个新客户端。
+          // 各平台字段名不同：Codex 写 client_id；Claude Code 和 agents 平台写 clientId。
+          // 仅远程 MCP 可用；OAuth 的登录令牌不写入项目配置，需要各自登录一次。
+          "oauth": { "clientId": "your-pre-registered-client-id" },
         },
       },
 

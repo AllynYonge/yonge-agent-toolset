@@ -5,7 +5,7 @@ import { basename, dirname, relative, resolve } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 import { type Platform, resolvePlatformMcpFile } from "./platform.js";
-import type { McpServerConfig } from "./types.js";
+import type { McpOAuthConfig, McpServerConfig } from "./types.js";
 
 const MCP_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
@@ -35,6 +35,25 @@ function validateStartupTimeout(raw: unknown): string | undefined {
   return undefined;
 }
 
+function validateOAuth(raw: unknown): McpOAuthConfig | string {
+  if (!isRecord(raw)) {
+    return "oauth must be an object";
+  }
+
+  const allowedFields = ["clientId"] as const;
+  for (const field of Object.keys(raw)) {
+    if (!(allowedFields as readonly string[]).includes(field)) {
+      return 'oauth contains unknown field "' + field + '"';
+    }
+  }
+
+  if (typeof raw.clientId !== "string" || raw.clientId.trim().length === 0) {
+    return 'oauth requires a non-empty "clientId" string';
+  }
+
+  return { clientId: raw.clientId };
+}
+
 function validateMcpServer(name: string, raw: unknown): McpServerConfig | string {
   if (!MCP_NAME_PATTERN.test(name)) {
     return "service name may contain only letters, numbers, hyphens, and underscores";
@@ -53,6 +72,9 @@ function validateMcpServer(name: string, raw: unknown): McpServerConfig | string
     }
     if (raw.env !== undefined && !isStringRecord(raw.env)) {
       return "local server env must contain only string values";
+    }
+    if (raw.oauth !== undefined) {
+      return "oauth is only supported for remote servers";
     }
 
     const startupTimeoutProblem = raw.startup_timeout_sec === undefined
@@ -88,10 +110,20 @@ function validateMcpServer(name: string, raw: unknown): McpServerConfig | string
       return startupTimeoutProblem;
     }
 
+    let oauth: McpOAuthConfig | undefined;
+    if (raw.oauth !== undefined) {
+      const validatedOAuth = validateOAuth(raw.oauth);
+      if (typeof validatedOAuth === "string") {
+        return validatedOAuth;
+      }
+      oauth = validatedOAuth;
+    }
+
     return {
       type: "remote",
       url: raw.url,
       ...(raw.headers === undefined ? {} : { headers: raw.headers as Record<string, string> }),
+      ...(oauth === undefined ? {} : { oauth }),
       ...(raw.startup_timeout_sec === undefined
         ? {}
         : { startup_timeout_sec: raw.startup_timeout_sec as number }),
@@ -119,7 +151,7 @@ function validateMcpServers(
   return { servers, warnings };
 }
 
-function toClaudeConfig(server: McpServerConfig): Record<string, unknown> {
+function toStandardMcpConfig(server: McpServerConfig): Record<string, unknown> {
   if (server.type === "local") {
     return {
       type: "stdio",
@@ -133,28 +165,7 @@ function toClaudeConfig(server: McpServerConfig): Record<string, unknown> {
     type: "http",
     url: server.url,
     ...(server.headers === undefined ? {} : { headers: server.headers }),
-  };
-}
-
-function toOpenCodeConfig(server: McpServerConfig): Record<string, unknown> {
-  if (server.type === "local") {
-    return {
-      type: "local",
-      command: [server.command, ...(server.args ?? [])],
-      ...(server.env === undefined ? {} : { environment: server.env }),
-      ...(server.startup_timeout_sec === undefined
-        ? {}
-        : { timeout: server.startup_timeout_sec * 1000 }),
-    };
-  }
-
-  return {
-    type: "remote",
-    url: server.url,
-    ...(server.headers === undefined ? {} : { headers: server.headers }),
-    ...(server.startup_timeout_sec === undefined
-      ? {}
-      : { timeout: server.startup_timeout_sec * 1000 }),
+    ...(server.oauth === undefined ? {} : { oauth: { clientId: server.oauth.clientId } }),
   };
 }
 
@@ -175,6 +186,7 @@ function toCodexConfig(server: McpServerConfig): Record<string, unknown> {
   return {
     url: server.url,
     ...(server.headers === undefined ? {} : { http_headers: server.headers }),
+    ...(server.oauth === undefined ? {} : { oauth: { client_id: server.oauth.clientId } }),
     ...startupTimeout,
   };
 }
@@ -221,7 +233,7 @@ async function atomicWrite(destination: string, content: string): Promise<void> 
   }
 }
 
-async function writeClaude(
+async function writeStandardMcp(
   destination: string,
   servers: Record<string, McpServerConfig>,
 ): Promise<void> {
@@ -234,39 +246,9 @@ async function writeClaude(
 
   const merged = existingServers ?? {};
   for (const [name, server] of Object.entries(servers)) {
-    merged[name] = toClaudeConfig(server);
+    merged[name] = toStandardMcpConfig(server);
   }
   root.mcpServers = merged;
-  await atomicWrite(destination, `${JSON.stringify(root, null, 2)}\n`);
-}
-
-async function writeOpenCode(
-  destination: string,
-  servers: Record<string, McpServerConfig>,
-): Promise<void> {
-  const existingRaw = await readOptional(destination);
-  const root = existingRaw === undefined
-    ? { $schema: "https://opencode.ai/config.json" }
-    : jsonObject(existingRaw, destination);
-  const existingMcp = root.mcp;
-  if (existingMcp !== undefined && !isRecord(existingMcp)) {
-    throw new Error(`${destination} has an invalid mcp object`);
-  }
-
-  const mcp = existingMcp ?? {};
-  const existingV2Servers = mcp.servers;
-  if (existingV2Servers !== undefined && !isRecord(existingV2Servers)) {
-    throw new Error(`${destination} has an invalid mcp.servers object`);
-  }
-  const target = existingV2Servers ?? mcp;
-
-  for (const [name, server] of Object.entries(servers)) {
-    target[name] = toOpenCodeConfig(server);
-  }
-  if (existingV2Servers !== undefined) {
-    mcp.servers = target;
-  }
-  root.mcp = mcp;
   await atomicWrite(destination, `${JSON.stringify(root, null, 2)}\n`);
 }
 
@@ -336,10 +318,9 @@ async function writePlatform(
 ): Promise<void> {
   if (platform === "codex") {
     await writeCodex(destination, servers);
-  } else if (platform === "claude") {
-    await writeClaude(destination, servers);
   } else {
-    await writeOpenCode(destination, servers);
+    // claude and agents both read the standard mcpServers shape.
+    await writeStandardMcp(destination, servers);
   }
 }
 

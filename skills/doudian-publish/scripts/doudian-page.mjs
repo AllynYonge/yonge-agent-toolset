@@ -9,7 +9,12 @@
  *  3. 新建规格值是六步序列，缺一步就静默失败，详见 addSpecValue。
  *  4. 受控输入框必须走原生 value setter + input 事件。
  */
-import { sleep, DOUDIAN_HOME } from './cdp.mjs';
+import { sleep, sleepExact, DOUDIAN_HOME } from './cdp.mjs';
+
+/** 智能填写二次解析超时：平台解析 5~10s 是常态，但实测慢时远超，可环境变量调 */
+const SMART_PARSE_TIMEOUT = Number(process.env.DOUDIAN_SMART_PARSE_TIMEOUT ?? 120000);
+/** 单个规格值写入后的轮询上限：页面重建 SKU 表慢时 20s 不够，可环境变量调 */
+const SPEC_WRITE_TIMEOUT = Number(process.env.DOUDIAN_SPEC_WRITE_TIMEOUT ?? 20000);
 
 const CREATE_URL = 'https://fxg.jinritemai.com/ffa/g/create';
 
@@ -210,14 +215,33 @@ export async function openCreatePage(openPage, existingPage, log = () => {}) {
  * 新版直接访问 create 页先进入资料上传页，必须先上传至少一张商品图，
  * 再点「下一步，生成商品」；上传的首图会自动带入后续首图位。
  * 旧版没有这个资料页时返回 false，由调用方继续走旧流程。
+ *
+ * 新版资料页的「下一步，生成商品」按钮是异步挂载的：文件 input 先出现，
+ * 按钮晚若干秒。一次性 eval 会把「还没挂载完」误判成「不是新版页面」，
+ * 落到旧版路径后找不到 image/* input，报 file input 不存在。
+ * 所以这里轮询等待，直到新版资料页或旧版首图表单二者之一真正挂载完成。
  */
 export async function prepareSmartFill(page, file) {
-  const landing = await page.eval(`return !!document.querySelector(
-    'input[type=file][accept=".jpg,.png,.jpeg,.csv,.xls,.xlsx"]'
-  ) && !!(document.querySelector('button.styles-module_nextButton__Y91rv')
-    || [...document.querySelectorAll('button')].find(
-      b => b.offsetParent && b.innerText.trim() === '下一步，生成商品'
-    ));`).catch(() => false);
+  const probe = `
+    return {
+      smart: !!document.querySelector('input[type=file][accept=".jpg,.png,.jpeg,.csv,.xls,.xlsx"]')
+        && !!(document.querySelector('button.styles-module_nextButton__Y91rv')
+          || [...document.querySelectorAll('button')].find(
+            b => b.offsetParent && b.innerText.trim() === '下一步，生成商品'
+          )),
+      legacy: !!document.querySelector('input[type=file][accept="image/*"]')
+        || !!document.querySelector('div.material-upload-button input[type=file]'),
+    };`;
+  let landing = false;
+  const deadline = Date.now() + 20000;
+  for (;;) {
+    const st = await page.eval(probe).catch(() => null);
+    if (st?.smart) { landing = true; break; }
+    // 旧版控件已挂载：确定不是新版资料页，立即交给调用方走旧流程
+    if (st?.legacy) break;
+    if (Date.now() > deadline) break;
+    await sleep(800);
+  }
   if (!landing) return false;
 
   await page.setFiles('input[type=file][accept=".jpg,.png,.jpeg,.csv,.xls,.xlsx"]', [file]);
@@ -257,20 +281,123 @@ export async function uploadFirstImage(page, file) {
   await sleep(1500);
 }
 
-/** 上传剩余主图（辅助图槽位，一次可传多张；兼容新旧首图页） */
+/**
+ * 上传剩余主图（辅助图槽位，一次可传多张；兼容新旧首图页）。
+ *
+ * 2026-08-31 实测修正（覆盖上一版的错误结论）：新版的辅助图就应该在
+ * **智能填写确认页**上传，而不是等进完整表单页。确认页的主图区就是
+ * 「1 个首图槽 + 4 个上传辅助图」，上传后 5/5，点「确认信息，继续生成」
+ * 跳转到完整表单后主图区仍是 5 张（已逐张比对 img src 验证，不会被丢弃）。
+ * 好处是不需要任何 3:4 派生图：完整表单页里第二个上传区才是「主图3:4」，
+ * 在那里传 1:1 图就变成了填 3:4 槽位。
+ *
+ * 主图区的定位不能再用「第一个含 5 个 file input 的 batchImageUpload」：
+ * 完整表单页里「主图」与「主图3:4」两个区块都是 5 个 input，靠计数会搞错对象。
+ * 改用祖先文案区分：主图区祖先含「主图」且**不含「3:4」/「白底图」**。
+ */
 export async function uploadExtraImages(page, files) {
   if (!files.length) return;
-  const countExpr = `new Set([
-    ...document.querySelectorAll('div.material-preview-button img'),
-    ...document.querySelectorAll('div.index-module_batchImageUpload__JtBRX img'),
-  ]).size`;
-  const before = await page.eval(`return ${countExpr}`).catch(() => 0);
-  await page.setFiles('div.material-upload-button input[type=file]', files);
+  // 主图区块的图片统计。靠祖先文案锁定区块，不靠 input 个数。
+  //
+  // 只数**已落到 CDN 的图**（src 不是 blob:/data:）。这一条是关键：
+  // 平台在文件选完的瞬间就把槽位渲染出来，此时 img 已存在但还没上传完，
+  // 单纯数 img 会让等待提前通过 —— 表现为「日志说传了 4 张，
+  // 点确认跳转后主图区只剩 1 张」（2026-08-31 实测：src 从无到
+  // png_m_xxx 约需 5s，期间 img 已挂载）。
+  const blockStatExpr = `(() => {
+    const blks = [...document.querySelectorAll('[class*=batchImageUpload]')]
+      .filter(x => x.offsetParent && x.querySelectorAll('input[type=file]').length >= 5);
+    const ctx = (b) => {
+      let p = b, t = '';
+      for (let k = 0; k < 6; k += 1) {
+        p = p.parentElement; if (!p) break;
+        const s = (p.innerText || '');
+        if (s.length > 0 && s.length < 260) t = s;
+      }
+      return t;
+    };
+    // 主图区：祖先文案含「主图」且不含 3:4 / 白底图。确认页只有一个块，
+    // 文案也命中（「*主图上传」）；两页同一套判据。
+    const blk = blks.find(b => { const t = ctx(b); return /主图/.test(t) && !/3:4|白底图/.test(t); })
+      ?? blks[0];
+    if (!blk) return { total: 0, done: 0 };
+    const imgs = [...blk.querySelectorAll('img')];
+    const done = imgs.filter(i => {
+      const s = i.src || '';
+      return s && !s.startsWith('blob:') && !s.startsWith('data:');
+    }).length;
+    return { total: imgs.length, done };
+  })()`;
+
+  // 先等辅助图槽位渲染：确认页的「确认信息，继续生成」按钮比
+  // material-upload-button 先挂载，上一版直接 setFiles 报过
+  // 「file input 不存在: div.material-upload-button input[type=file]」。
   await page.waitFor(
-    `return ${countExpr} >= ${before + files.length}`,
-    { label: '辅助图上传完成', timeoutMs: 90000 },
+    `return document.querySelectorAll('div.material-upload-button input[type=file]').length > 0`,
+    { label: '辅助图槽位渲染', timeoutMs: 60000 },
   );
-  await sleep(1000);
+
+  const stat = async () => await page.eval(`return ${blockStatExpr}`).catch(() => ({ total: 0, done: 0 }));
+  const before = (await stat()).done;
+  const want = before + files.length;
+
+  // setFiles 偶发静默不生效（实测出现过 input.files 仍为 0、页面毫无反应），
+  // 所以整段「投文件 → 等上传完」做成可重试的，而不是投一次就死等。
+  let lastDone = before;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    await page.setFiles('div.material-upload-button input[type=file]', files)
+      .catch((e) => { if (attempt === 3) throw e; });
+
+    // 等到「已落 CDN 的图片数」达标且连续 3 次采样不再变化（稳定即完成）。
+    const deadline = Date.now() + 90000;
+    let stable = 0;
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      const cur = await stat();
+      lastDone = cur.done;
+      if (cur.done >= want) {
+        stable += 1;
+        if (stable >= 3) {
+          await sleep(1000);
+          return cur.done;
+        }
+      } else {
+        stable = 0;
+      }
+    }
+    if (lastDone > before) break; // 有进展但没齐，交给调用方的补齐逻辑处理
+  }
+  if (lastDone <= before) {
+    throw new Error(`等待超时: 辅助图上传完成（主图区已上传 ${lastDone} 张，期望 ${want} 张）`);
+  }
+  return lastDone;
+}
+
+/**
+ * 读主图区已上传完成（落到 CDN）的图片数。
+ * 供上传后二次核对用：跨页跳转后再确认一次，比只信上传时的等待更稳。
+ */
+export async function countMainImages(page) {
+  return await page.eval(`
+    const blks = [...document.querySelectorAll('[class*=batchImageUpload]')]
+      .filter(x => x.offsetParent && x.querySelectorAll('input[type=file]').length >= 5);
+    const ctx = (b) => {
+      let p = b, t = '';
+      for (let k = 0; k < 6; k += 1) {
+        p = p.parentElement; if (!p) break;
+        const s = (p.innerText || '');
+        if (s.length > 0 && s.length < 260) t = s;
+      }
+      return t;
+    };
+    const blk = blks.find(b => { const t = ctx(b); return /主图/.test(t) && !/3:4|白底图/.test(t); })
+      ?? blks[0];
+    if (!blk) return 0;
+    return [...blk.querySelectorAll('img')].filter(i => {
+      const s = i.src || '';
+      return s && !s.startsWith('blob:') && !s.startsWith('data:');
+    }).length;
+  `).catch(() => 0);
 }
 
 export async function fillTitle(page, title) {
@@ -588,9 +715,11 @@ export async function gotoStepTwo(page) {
     await page.clickReal('[data-dp=smart-confirm]');
     await page.waitFor(`
       const t = document.body?.innerText ?? '';
-      return t.includes('商品详情图') && t.includes('价格库存')
+      // 2026-08-30 实测：平台文案把「商品详情图」改成了「详情图片」，两者任一出现即可
+      const hasDetail = t.includes('商品详情图') || t.includes('详情图片');
+      return hasDetail && t.includes('价格库存')
         && !t.includes('继续解析你上传的材料');
-    `, { label: '完成 AI 解析并进入详情表单', timeoutMs: 120000 });
+    `, { label: '完成 AI 解析并进入详情表单', timeoutMs: SMART_PARSE_TIMEOUT });
     await sleep(2000);
     return { smart: true, ...info };
   }
@@ -636,6 +765,12 @@ export async function gotoStepTwo(page) {
  * `.aurora-dorami-composition-select-select`（**不是 -wrapper**，wrapper 在 DOM 里排前面，
  * 早期版本按 DOM 顺序取到它，点击间歇性不生效），且必须真实鼠标点击。
  * 单次点击仍会偶发丢失，所以下面用「点击 → 等搜索框 → 没出现就重点」的重试循环。
+ *
+ * 2026-08-31 实测修复——**必须先清预填值**：新版智能填写会自己填一个材质
+ * （实测填了「新型聚酯纤维」且**不带含量**）。直接追加自己的「聚酯纤维 100%」
+ * 会变成两条并存，平台报两条错：「该项为必填，请输入」+「含量必须全填写或
+ * 全不填写，且材质不能重复」（且两者还同属聚酯纤维系）。预填项的删除入口是
+ * `.aurora-select-selection-item-remove`，纯 JS click 即可生效。
  */
 export async function setFabric(page, pairs) {
   // 上传主图后抖店可能自动弹出 AI素材工具 抽屉，先关闭再操作属性控件。
@@ -646,6 +781,25 @@ export async function setFabric(page, pairs) {
       .find(x => x.offsetParent && x.getBoundingClientRect().width > 20)`,
     { label: '面料材质控件渲染', timeoutMs: 30000 },
   );
+
+  // 先清掷智能填写预填的材质项（可能多条，每删一条 DOM 重建，所以逐次删到空）。
+  // 不清就会与下面追加的值并存，触发「含量必须全填写或全不填写，且材质不能重复」。
+  for (let i = 0; i < 8; i += 1) {
+    const removed = await page.eval(`
+      const w = [...document.querySelectorAll('.aurora-dorami-composition-select-wrapper')]
+        .find(x => x.offsetParent);
+      if (!w) return null;
+      const item = w.querySelector('.aurora-select-selection-item');
+      if (!item) return null;
+      const txt = (item.innerText || '').trim();
+      const rm = item.querySelector('.aurora-select-selection-item-remove');
+      if (!rm) return null;
+      rm.click();
+      return txt;
+    `).catch(() => null);
+    if (!removed) break;
+    await sleep(600);
+  }
 
   // 弹层里的材质搜索框是否已就绪
   const SEARCH_EXPR = `[...document.querySelectorAll('input.aurora-dorami-composition-select-search, input[placeholder="搜索材质"], input[placeholder="请输入"]')]
@@ -748,7 +902,10 @@ export async function setFabric(page, pairs) {
   }
 
   await page.evalExpr('document.body.click()');
-  await sleep(1500);
+  await sleep(500);
+  // 材质 AI 工具抽屉可能仍覆盖完整表单；必须关闭后再操作品牌等控件。
+  await dismissModals(page);
+  await sleep(1000);
   return await page.eval(`
     const t = document.body.innerText;
     const i = t.indexOf('面料材质');
@@ -756,16 +913,52 @@ export async function setFabric(page, pairs) {
   `);
 }
 
-/** 品牌：ecom-g-select，需要先输入再选。无品牌时传 '无品牌' */
+/**
+ * 品牌：`ecom-g-select`，先输入再选。无品牌时传 '无品牌'。
+ *
+ * 2026-08-31 实测修复：**不能靠 placeholder「请输入需要关联的品牌」定位**。
+ * 新版智能填写会把品牌预填成「无品牌」，此时控件已有选中值、placeholder 消失，
+ * 老选择器一个都匹配不到 → setBrand 静默什么都没做，接着卡在
+ * 「等待超时: 品牌搜索结果」。改用「品牌」标签的兄弟容器定位（同 setComboCount /
+ * setAgeRange 那套结构不变量），预填与空白两种状态都命中。
+ *
+ * 展开也必须走 clickReal：已有选中值时纯 JS 写 input.value 不触发服务端搜索，
+ * 下拉永远不出现（通用坑位 1）。
+ */
 export async function setBrand(page, brand = '无品牌') {
+  const marked = await page.eval(`
+    document.querySelectorAll('[data-dp=brand]').forEach(e => e.removeAttribute('data-dp'));
+    const leaf = [...document.querySelectorAll('span,div,label')]
+      .find(x => x.offsetParent && x.children.length === 0 && (x.innerText || '').trim() === '品牌');
+    if (!leaf) return false;
+    let p = leaf;
+    for (let k = 0; k < 8; k += 1) {
+      p = p.parentElement;
+      if (!p) break;
+      const sel = p.nextElementSibling?.querySelector('.ecom-g-select');
+      if (sel) {
+        sel.setAttribute('data-dp', 'brand');
+        sel.scrollIntoView({ block: 'center' });
+        return (sel.innerText || '').trim();
+      }
+    }
+    return false;
+  `);
+  if (marked === false) throw new Error('未找到品牌控件');
+  // 已是目标品牌就不动（幂等，少一次无谓的服务端搜索）
+  if (typeof marked === 'string' && marked === brand) {
+    await sleep(500);
+    return;
+  }
+
+  await page.clickReal('[data-dp=brand]');
+  await sleep(1200);
   await page.eval(`
-    const s = [...document.querySelectorAll('.ecom-g-select')]
-      .find(x => /请输入需要关联的品牌/.test(x.innerText));
-    if (!s) return false;
-    const i = s.querySelector('input');
-    s.scrollIntoView({ block: 'center' });
+    const s = document.querySelector('[data-dp=brand]');
+    const i = s?.querySelector('input');
+    if (!i) return false;
     const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-    i.focus(); i.click(); set.call(i, ${JSON.stringify(brand)});
+    i.focus(); set.call(i, ${JSON.stringify(brand)});
     i.dispatchEvent(new Event('input', { bubbles: true }));
     return true;
   `);
@@ -857,6 +1050,52 @@ export function styleOptionExpr(name) {
 }
 
 const STYLE_MAX = 5;
+
+/**
+ * 收集风格候选全集：打开风格下拉，虚拟滚动收集当前类目全部可选项后收起。
+ *
+ * 用运行时事实替代文档快照：平台选项集会变，页面上拿到的才是「当前支持」。
+ * 交互约束与 setStyles 同源（真实点击展开、收集前清搜索词、收尾清词+收起），
+ * 详见 dom-notes.md「风格」节。收集失败返回 { 存在: false }，不阻断。
+ */
+export async function getStyleCandidates(page) {
+  const cls = await page.eval(styleSelectExpr());
+  if (!cls) return { 存在: false, 可选: [] };
+  await sleep(600);
+
+  const isOpen = () => page.eval(`
+    const s = document.querySelector('[data-dp=style]');
+    return !!s && /ecom-g-select-open/.test(s.className);
+  `).catch(() => false);
+
+  let opened = false;
+  for (let i = 0; i < 3 && !opened; i += 1) {
+    await page.clickReal('[data-dp=style]').catch(() => {});
+    for (let waited = 0; waited < 3000; waited += 400) {
+      await sleep(400);
+      if (await isOpen()) { opened = true; break; }
+    }
+  }
+  if (!opened) return { 存在: false, 可选: [] };
+
+  const options = await collectOptions(page);
+
+  // 收尾：清搜索词 + 收起面板（同 setStyles，残留过滤词会挡住后续字段）
+  await page.eval(`
+    const s = document.querySelector('[data-dp=style]');
+    const i = s?.querySelector('input.ecom-g-select-selection-search-input');
+    if (i) {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      set.call(i, '');
+      i.dispatchEvent(new Event('input', { bubbles: true }));
+      i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    }
+    document.body.click();
+    return true;
+  `).catch(() => {});
+  await sleep(1000);
+  return { 存在: options.length > 0, 可选: options };
+}
 
 export async function setStyles(page, styles) {
   const want = (styles ?? []).filter(Boolean);
@@ -1007,6 +1246,129 @@ async function collectOptions(page) {
 }
 
 /**
+ * 热搜词推荐：风格控件下方的推荐词区块，点击词即追加进商品标题。
+ *
+ * 实测行为（2026-08-30 真页验证，非推断）：
+ * - 标题计数器按**字节**计（中文 2、英文 1），上限 60；标题框是本页
+ *   第一个 input.ecom-g-input，可用来验证点击是否生效。
+ * - 点击词元素必须打在最内层 div（文本与外层包裹 div 相同，
+ *   querySelectorAll 按 DOM 序会先命中外层，点它不触发 handler）。
+ * - 点击方式：向最内层词 div 派发四事件（mouseover→mousedown→mouseup→click，
+ *   bubbles），已真页验证生效。
+ * - 停止条件有两个：①点击后弹「标题过长」toast（实测未触发过，
+ *   作为兑底保留）；②**标题余量放不下任何一个推荐词时，整个区块
+ *   直接从 DOM 撤下**（实测主路径：计数器 57/60 时区块消失）。
+ * - 页面常驻 toast「尺码表缺少…」等与本功能无关，只匹配「标题过长」。
+ *
+ * 结构：
+ *   div.style_recomands__*
+ *     ├─ span 「热搜词推荐」
+ *     └─ div.style_tags__*[data-kora-exposure*=seo_word_expo]
+ *          └─ div > div.style_words__*（词 + #icon-tianjia 图标）
+ *
+ * 定位不用 CSS Modules 哈希（发版即变），只用两层稳定锚点：
+ *   ① [data-kora-exposure*="seo_word_expo"] 属性（顺便白送推荐词全集 JSON）
+ *   ② 「热搜词推荐」可见文案
+ * 见 selectors.mjs 尾部注释，哈希不登记（登记了反而让 doctor 报假阳性）。
+ *
+ * 区块不渲染时返回 { 存在: false }，调用方警告跳过，不阻断。
+ */
+
+/** 读热搜词候选集：只定位+读 keyword_list，不点击。区块不存在返回 { 存在: false } */
+export async function getHotWordCandidates(page) {
+  const found = await locateHotWords(page);
+  if (!found) return { 存在: false, 可选: [] };
+  await sleep(800);
+  return { 存在: true, 可选: found.words };
+}
+
+/**
+ * 点击热搜词（列表顺序即点击顺序）。配合 getHotWordCandidates 用：
+ * 候选集来自页面推荐，相关度判断与排序由调用方（pi 视觉或手动）完成后传入。
+ * 停止条件与实测行为见本文件上方热搜词总注释。
+ */
+export async function clickHotWords(page, words) {
+  const want = (words ?? []).filter(Boolean);
+  const empty = { 已添加: [], 停止: null, 停止原因: null };
+  if (!want.length) return empty;
+
+  const added = [];
+  let stopped = null;
+  let stopReason = null;
+  for (const word of want) {
+    // 每词重新定位：React 重渲染会重置 data-dp 标记，且区块可能随时被撤下
+    const click = await page.eval(`
+      const locate = () => {
+        const tags = document.querySelector('[data-kora-exposure*="seo_word_expo"]');
+        if (tags) return tags.closest('div')?.parentElement || null;
+        const label = [...document.querySelectorAll('span')]
+          .find(x => x.offsetParent && /热搜词推荐/.test(x.innerText));
+        if (label) return label.closest('div[class*=recomands]') || label.parentElement?.parentElement || null;
+        return null;
+      };
+      const c = locate();
+      if (!c) return { state: '区块不存在' };
+      c.setAttribute('data-dp', 'hotwords');
+      const w = ${JSON.stringify(word)};
+      const matches = [...c.querySelectorAll('div')]
+        .filter((d) => (d.innerText || '').trim() === w);
+      // 必须选最内层：外层包裹 div 文本相同，点它不触发 handler
+      const inner = matches.reverse()
+        .find((d) => ![...d.querySelectorAll('div')].some((k) => (k.innerText || '').trim() === w));
+      if (!inner || !inner.offsetParent) return { state: '词不存在' };
+      inner.scrollIntoView({ block: 'center' });
+      for (const type of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+        inner.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      }
+      return { state: 'ok' };
+    `).catch(() => ({ state: 'eval失败' }));
+
+    if (click.state === '区块不存在') { stopReason = '推荐区块已被平台撤下（标题余量不足）'; break; }
+    if (click.state !== 'ok') continue;   // 词不在当前推荐里，跳过
+
+    // 点完轮询 toast：出现「标题过长」即停止，本词不算已添加
+    let hit = false;
+    for (let t = 0; t < 10; t += 1) {
+      await sleepExact(400);
+      hit = await page.eval(`
+        return [...document.querySelectorAll('[class*=message]')]
+          .some((x) => x.offsetParent && /标题过长/.test(x.innerText));
+      `).catch(() => false);
+      if (hit) break;
+    }
+    if (hit) { stopped = word; stopReason = '标题过长，无法添加'; break; }
+    added.push(word);
+    await sleep(1200);   // 拟人间隔，词与词之间
+  }
+
+  return { 已添加: added, 停止: stopped, 停止原因: stopReason };
+}
+
+/** 定位热搜词区块：属性/文案双稳定锚点，不用哈希。返回推荐词列表或 null */
+async function locateHotWords(page) {
+  return await page.eval(`
+    const locate = () => {
+      const tags = document.querySelector('[data-kora-exposure*="seo_word_expo"]');
+      if (tags) return tags.closest('div')?.parentElement || null;
+      const label = [...document.querySelectorAll('span')]
+        .find(x => x.offsetParent && /热搜词推荐/.test(x.innerText));
+      if (label) return label.closest('div[class*=recomands]') || label.parentElement?.parentElement || null;
+      return null;
+    };
+    const c = locate();
+    if (!c) return null;
+    c.scrollIntoView({ block: 'center' });
+    const tags = c.querySelector('[data-kora-exposure*="seo_word_expo"]');
+    let list = [];
+    try {
+      const meta = JSON.parse(tags?.getAttribute('data-kora-exposure') || '{}');
+      list = (meta.data?.keyword_list ?? []).map((k) => k.name).filter(Boolean);
+    } catch {}
+    return { words: list };
+  `).catch(() => null);
+}
+
+/**
  * 导购短标题：点输入框右侧 AI 图标，平台 5-7 秒后**直接把结果写进输入框**。
  *
  * 与商品标题的 AI 不同：那个会弹一个推荐列表让你选，这个不弹层、直接填。
@@ -1084,6 +1446,261 @@ export async function setArticleNo(page, code) {
   `);
 }
 
+/** ---------- 类目属性补充：组合件数 / 适用年龄 / 上市时间 ---------- */
+
+/**
+ * 三个非必填属性（2026-08-30 实测，不填拉低商品质量分，见 SKILL.md 已知限制）：
+ *
+ * 【组合件数】ecom-g-select 单选，服务端搜索型（同品牌）：
+ *   输入搜索词 → 等待 auto-dropdown-id-组合件数 下拉 → 点精确选项。
+ *   选项集：单件 / 两件 / 三件 / 4件套。
+ *
+ * 【适用年龄】ecom-g-select 单选，但选项是**本地静态**（搜索无结果，
+ *   必须真实点击展开才能看到）；且分桶固定（18-29、29-39、39-49 等），
+ *   自定义值要走「+新建适用年龄」：
+ *     ① clickReal 展开下拉
+ *     ② el.click() 点内层 span.styles_newSKU（外层 div 点了无效）
+ *     ③ 控件被替换为自定义输入框 input[class*=skuNameInput]
+ *        —— 先查已有值，非空且不等目标值要先清空（重复输入会拼成 19-3919-39）
+ *     ④ 真实 CDP 键盘输入（合成 KeyboardEvent 进不去 React onKeyDown）
+ *     ⑤ 点 img[alt="确认"]（是 img 元素，不是 svg/button/data-kora，
+ *        旁边还有 img[alt="取消"]）
+ *
+ * 【上市时间】自由文本 input[dropdownclassname="auto-dropdown-id-上市时间"]，
+ *   原生 setter 写入即可，blur 后值保持（实测 "2026" 无需选下拉）。
+ */
+
+/** 读「属性信息」里某个 label 对应的选中标签（.ecom-g-select-selection-item） */
+async function readAttrSelection(page, name) {
+  return await page.eval(`
+    const leaf = [...document.querySelectorAll('span,div,label')]
+      .find(x => x.offsetParent && x.children.length === 0 && (x.innerText || '').trim() === ${JSON.stringify(name)});
+    if (!leaf) return null;
+    let p = leaf;
+    for (let k = 0; k < 8; k++) {
+      p = p.parentElement;
+      if (!p) break;
+      const ctrl = p.nextElementSibling;
+      if (ctrl) {
+        return [...ctrl.querySelectorAll('.ecom-g-select-selection-item')]
+          .map(x => (x.innerText || '').trim()).filter(Boolean);
+      }
+    }
+    return null;
+  `);
+}
+
+/** 组合件数：服务端搜索下拉，同 setBrand 交互 */
+export async function setComboCount(page, value = '两件') {
+  await page.eval(`
+    const leaf = [...document.querySelectorAll('span,div,label')]
+      .find(x => x.offsetParent && x.children.length === 0 && (x.innerText || '').trim() === '组合件数');
+    if (!leaf) return false;
+    let p = leaf;
+    for (let k = 0; k < 8; k++) {
+      p = p.parentElement;
+      if (!p) break;
+      const sel = p.nextElementSibling?.querySelector('.ecom-g-select');
+      if (sel) {
+        sel.scrollIntoView({ block: 'center' });
+        sel.setAttribute('data-dp', 'combo-count');
+        const i = sel.querySelector('input');
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        i.focus(); i.click();
+        set.call(i, ${JSON.stringify(value)});
+        i.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  `);
+  await waitDropdownOptions(page, {
+    match: 'auto-dropdown-id-组合件数',
+    label: `组合件数搜索结果（${value}）`,
+  });
+  const ok = await page.eval(`
+    const d = [...document.querySelectorAll('.ecom-g-select-dropdown')]
+      .find(x => /auto-dropdown-id-组合件数/.test(x.className));
+    if (!d) return false;
+    const opts = [...d.querySelectorAll('.ecom-g-select-item-option')];
+    const exact = opts.find(o => o.innerText.trim() === ${JSON.stringify(value)});
+    const target = exact || opts[0];
+    if (!target) return false;
+    ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(t =>
+      target.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })));
+    return true;
+  `);
+  if (!ok) throw new Error(`组合件数未找到: ${value}`);
+  await sleep(2000);
+  const sel = await readAttrSelection(page, '组合件数');
+  return sel;
+}
+
+/** 真实 CDP 键盘输入（合成 KeyboardEvent 触发不了 React onKeyDown） */
+async function typeReal(page, text) {
+  for (const ch of text) {
+    await page.cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown', text: ch, key: ch, unmodifiedText: ch,
+      windowsVirtualKeyCode: ch.charCodeAt(0), nativeVirtualKeyCode: ch.charCodeAt(0),
+    }, page.sessionId);
+    await page.cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: ch,
+      windowsVirtualKeyCode: ch.charCodeAt(0), nativeVirtualKeyCode: ch.charCodeAt(0),
+    }, page.sessionId);
+  }
+}
+
+/**
+ * 适用年龄：单选 + 本地静态选项。
+ *
+ * 注意：平台选项集是店铺级持久的——「19-39」一旦创建过就直接是选项，
+ * 所以先找已有选项直接点；找不到才走「+新建适用年龄」，且**确认≠选中**：
+ * img[alt=确认] 只是把自定义值加入选项列表，必须再点一次该选项才真正选中。
+ * 流程与坑见本文件上方「类目属性补充」总注释。提交后轮询选中标签。
+ */
+export async function setAgeRange(page, value = '19-39') {
+  // 已是目标值就不动（幂等）
+  const existing = await readAttrSelection(page, '适用年龄');
+  if (existing?.includes(value)) return existing;
+
+  // 展开下拉
+  await page.eval(`
+    document.querySelectorAll('[data-dp=age-select]').forEach(e => e.removeAttribute('data-dp'));
+    const leaf = [...document.querySelectorAll('span,div,label')]
+      .find(x => x.offsetParent && x.children.length === 0 && (x.innerText || '').trim() === '适用年龄');
+    if (!leaf) return false;
+    let p = leaf;
+    for (let k = 0; k < 8; k++) {
+      p = p.parentElement;
+      if (!p) break;
+      const sel = p.nextElementSibling?.querySelector('.ecom-g-select');
+      if (sel) { sel.setAttribute('data-dp', 'age-select'); sel.scrollIntoView({ block: 'center' }); return true; }
+    }
+    return false;
+  `);
+  await page.clickReal('[data-dp=age-select]');
+  await sleep(2000);
+
+  /** 点下拉里文本精确等于 value 的选项（四事件），返回是否找到 */
+  const clickOption = () => page.eval(`
+    const d = [...document.querySelectorAll('.ecom-g-select-dropdown')]
+      .find(x => x.offsetParent && /auto-dropdown-id-适用年龄/.test(x.className));
+    if (!d) return false;
+    const opt = [...d.querySelectorAll('.ecom-g-select-item-option')]
+      .find(o => (o.innerText || '').trim() === ${JSON.stringify(value)});
+    if (!opt) return false;
+    ['mouseover', 'mousedown', 'mouseup', 'click'].forEach(t =>
+      opt.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })));
+    return true;
+  `);
+
+  // 路径 A：选项已存在（之前创建过）→ 直接点
+  if (await clickOption()) {
+    const sel = await pollAgeSelection(page, value);
+    return sel;
+  }
+
+  // 路径 B：不存在 → 走「+新建适用年龄」
+  const clicked = await page.eval(`
+    const d = [...document.querySelectorAll('.ecom-g-select-dropdown')]
+      .find(x => x.offsetParent && /auto-dropdown-id-适用年龄/.test(x.className));
+    if (!d) return false;
+    const el = d.querySelector('span[class*=newSKU]');
+    if (!el) return false;
+    el.click();
+    return true;
+  `);
+  if (!clicked) throw new Error('适用年龄下拉里未找到「+新建适用年龄」');
+  await sleep(2000);
+
+  // 自定义输入框：先查已有值（残留会导致重复拼接），再决定是否补输
+  const marked = await page.eval(`
+    const d = [...document.querySelectorAll('.ecom-g-select-dropdown')]
+      .find(x => x.offsetParent && /auto-dropdown-id-适用年龄/.test(x.className));
+    const i = d?.querySelector('input[class*=skuNameInput]');
+    if (!i) return null;
+    i.setAttribute('data-dp', 'age-custom-input');
+    i.scrollIntoView({ block: 'center' });
+    return i.value;
+  `);
+  if (marked === null) throw new Error('适用年龄自定义输入框未出现');
+  await page.clickReal('[data-dp=age-custom-input]');
+  await sleep(600);
+  if (marked !== value) {
+    // 清掉残留（真实全选 + 覆盖输入）
+    await page.cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyDown', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      modifiers: 2,
+    }, page.sessionId);
+    await page.cdp.send('Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'a', code: 'KeyA', windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65,
+      modifiers: 2,
+    }, page.sessionId);
+    await typeReal(page, value);
+  }
+  await sleep(800);
+
+  // 点 img[alt="确认"]（注意不是 svg/button，旁边还有 img[alt="取消"]）。
+  // 确认只是把值加入选项列表，不等于选中。
+  const confirmed = await page.eval(`
+    const d = [...document.querySelectorAll('.ecom-g-select-dropdown')]
+      .find(x => x.offsetParent && /auto-dropdown-id-适用年龄/.test(x.className));
+    const img = d?.querySelector('img[alt="确认"]');
+    if (!img) return false;
+    img.click();
+    return true;
+  `);
+  if (!confirmed) throw new Error('适用年龄未找到确认按钮 img[alt=确认]');
+  await sleep(1500);
+
+  // 新选项入列后，必须再点一次选项才真正选中
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    if (await clickOption()) {
+      const sel = await pollAgeSelection(page, value);
+      return sel;
+    }
+    const sel = await readAttrSelection(page, '适用年龄');
+    if (sel?.includes(value)) return sel;
+    if (Date.now() > deadline) {
+      throw new Error(`适用年龄写入失败: ${value}（当前: ${sel?.join('、') ?? '无'}）`);
+    }
+    await sleep(800);
+  }
+}
+
+/** 轮询等选中标签出现目标值（点选项后异步生效） */
+async function pollAgeSelection(page, value) {
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    const sel = await readAttrSelection(page, '适用年龄');
+    if (sel?.includes(value)) return sel;
+    if (Date.now() > deadline) {
+      throw new Error(`适用年龄选中失败: ${value}（当前: ${sel?.join('、') ?? '无'}）`);
+    }
+    await sleep(800);
+  }
+}
+
+/** 上市时间：自由文本 input，原生 setter 写入 + blur */
+export async function setLaunchYear(page, value = '2026') {
+  const v = await page.eval(`
+    const i = document.querySelector('input[dropdownclassname="auto-dropdown-id-上市时间"]');
+    if (!i) return null;
+    if (i.value === ${JSON.stringify(value)}) return i.value;
+    i.scrollIntoView({ block: 'center' });
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    i.focus();
+    set.call(i, ${JSON.stringify(value)});
+    i.dispatchEvent(new Event('input', { bubbles: true }));
+    i.dispatchEvent(new Event('blur', { bubbles: true }));
+    return i.value;
+  `);
+  if (v === null) throw new Error('未找到「上市时间」输入框');
+  if (v !== value) throw new Error(`上市时间写入失败（当前: ${v}）`);
+  return v;
+}
+
 /** ---------- 图文信息 ---------- */
 
 export async function uploadDetailImages(page, files) {
@@ -1102,6 +1719,88 @@ export async function uploadDetailImages(page, files) {
 }
 
 /** ---------- 规格设置 ---------- */
+
+/**
+ * 删掉智能填写预填的、不在模板「规格值」里的**第一组**规格值。
+ *
+ * 2026-08-31 实测：新版会从主图猜一个颜色（实测「杏色」）先占一行。
+ * 不删它就会与 addSpecValue 追加的值并存，后果是连锰的：
+ *  - SKU 行数变 4×4=16 而不是 3×4=12，多出的「杏色」四行既无价格（模板里没有
+ *    这个规格值）也无规格图 → 平台报「价格该项为必填」+「请上传规格图」；
+ *  - fillSkuTable 的 codeRule 也会给它生成 GZ0074-杏色-S 这类垃圾编码。
+ *
+ * **作用域必须锁在第一组**（踩过的坑）：`.style_specValueContent___uoY8`
+ * 第一组（颜色分类）与第二组（尺码大小）**共用同一个类名**。全页扫会把
+ * S/M/L/XL 也一并删光（实测已发生：返回 [杏色,S,M,L,XL]，尺码组被清空）。
+ * 组容器的结构不变量：含组名文案且**不含「尺码大小」**的最小容器。
+ *
+ * 删除入口是行尾的 `[data-kora="删除规格值"]`（span，14×20）。
+ * 每删一行表格重建，所以逐行重新查询，不缓存元素引用。
+ * 只删「不在 keep 里」的值，幂等：预填值恰好命中模板时不动。
+ */
+export async function removePrefilledSpecValues(page, keep, groupName = '颜色分类') {
+  const keepJson = JSON.stringify(keep);
+  const nameJson = JSON.stringify(groupName);
+  const removed = [];
+  for (let i = 0; i < 12; i += 1) {
+    const gone = await page.eval(`
+      const keep = ${keepJson};
+      const gname = ${nameJson};
+      // 第一组容器：含组名、不含「尺码大小」、且里面真有规格值行。
+      // 取满足条件的**最内层**（DOM 顺序里最后一个），避开包住两组的外层。
+      const groups = [...document.querySelectorAll('div')].filter(d => {
+        if (!d.offsetParent) return false;
+        const t = d.innerText || '';
+        return t.includes(gname) && !t.includes('尺码大小')
+          && d.querySelectorAll('.style_specValueContent___uoY8').length > 0;
+      });
+      const scope = groups[groups.length - 1];
+      if (!scope) return null;
+      const rows = [...scope.querySelectorAll('.style_specValueContent___uoY8')]
+        .filter(x => x.offsetParent);
+      for (const row of rows) {
+        const label = row.querySelector('.ecom-g-cascader-picker-label');
+        const v = (label?.innerText || '').trim();
+        if (!v || keep.includes(v)) continue;
+        const del = row.querySelector('[data-kora="删除规格值"]');
+        if (!del) continue;
+        for (const ty of ['mouseover', 'mousedown', 'mouseup', 'click']) {
+          del.dispatchEvent(new MouseEvent(ty, { bubbles: true, cancelable: true, view: window }));
+        }
+        return v;
+      }
+      return null;
+    `).catch(() => null);
+    if (!gone) break;
+    removed.push(gone);
+    await sleep(900);
+    // 删除可能弹确认框（已有 SKU 行时平台会问），有就确认
+    await confirmDialog(page, /^(确定|确认|删除)$/).catch(() => {});
+  }
+  return removed;
+}
+
+/**
+ * 点弹窗里的确认按钮（存在则点，不存在不报错）。
+ * 与 dismissModals 分开：那个是「关掉干扰弹窗」，这个是「确认一个动作」。
+ */
+async function confirmDialog(page, re = /^(确定|确认)$/) {
+  const found = await page.eval(`
+    document.querySelectorAll('[data-dp=confirm-dialog]').forEach(e => e.removeAttribute('data-dp'));
+    const scope = [...document.querySelectorAll('.ecom-g-modal, [role="dialog"], .auxo-modal')]
+      .find(x => x.offsetParent);
+    if (!scope) return false;
+    const b = [...scope.querySelectorAll('button')]
+      .find(x => x.offsetParent && ${re.toString()}.test((x.innerText || '').trim()));
+    if (!b) return false;
+    b.setAttribute('data-dp', 'confirm-dialog');
+    return true;
+  `).catch(() => false);
+  if (!found) return false;
+  await page.clickReal('[data-dp=confirm-dialog]').catch(() => {});
+  await sleep(1000);
+  return true;
+}
 
 /**
  * 从「智能填写助手」切到手动填写模式。
@@ -1241,7 +1940,7 @@ export async function addSpecValue(page, value) {
   // 写入规格区是异步的（点「确定」后组件要重建规格区 + SKU 表），
   // 固定 sleep 会间歇性读到空数组 → 误报「规格值写入失败（当前: ）」。改为轮询。
   let now = [];
-  const deadline = Date.now() + 20000;
+  const deadline = Date.now() + SPEC_WRITE_TIMEOUT;
   for (;;) {
     now = await listSpecValues(page);
     if (now.includes(value)) break;
