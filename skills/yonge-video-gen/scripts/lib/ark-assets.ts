@@ -45,8 +45,8 @@ const groupCache = new Map<string, string>();
 let credentialsPromise: Promise<YongeCredentials> | null = null;
 
 /**
- * 从 ~/.yonge/.yonge-skills/.env 与项目级 .yonge/.yonge-skills/.env 读 COS 凭证；
- * 方舟 AK/SK/COS 环境变量优先级更高，便于 CI 或临时覆盖。
+ * 读取方舟 AK/SK 与 COS 凭证。.env 已由 main.ts 通过 lib/skill-config.ts 写入环境，
+ * 优先级：进程环境变量 > <cwd>/.yonge/.yonge-skills/.env > ~/.yonge/.yonge-skills/.env。
  */
 export async function loadYongeCredentials(): Promise<YongeCredentials> {
   credentialsPromise ||= (async () => {

@@ -8,11 +8,11 @@
  */
 import path from "node:path";
 import process from "node:process";
-import { homedir } from "node:os";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 import { ensureVideoExtension } from "./lib/media";
 import { normalizeDuration, normalizeRatio, normalizeResolution, pixelLabel } from "./lib/seedance";
+import { ConfigError, getConfigValue, loadDotEnv, loadSkillConfig, type ConfigMap } from "./lib/skill-config";
 import { PendingError } from "./providers/ark";
 import type {
   BatchFile,
@@ -89,8 +89,9 @@ function printUsage(): void {
   { "jobs": 2, "tasks": [ { "id": "s01", "promptFiles": ["prompts/s01.md"], "video": "out/s01.mp4", "ref": ["kf/s01.png"], "ratio": "16:9" } ] }
 
 配置与凭证加载优先级:
-  CLI 参数 > EXTEND.md > 环境变量 > ~/.yonge/.yonge-skills/.env > <cwd>/.yonge/.yonge-skills/.env
-  方舟 AK/SK 与腾讯 COS 凭证也放在 ~/.yonge/.yonge-skills/.env（ARK_ACCESS_KEY/ARK_SECRET_KEY/TENCENT_COS_*）
+  CLI 参数 > EXTEND.md > 环境变量 > <cwd>/.yonge/.yonge-skills/.env > ~/.yonge/.yonge-skills/.env > 内置默认值
+  偏好写在 .yonge/.yonge-skills/yonge-video-gen/EXTEND.md（项目级优先，命中第一个就停）
+  密钥只放 .env，不写进 EXTEND.md。方舟 AK/SK 与腾讯 COS 凭证同放（ARK_ACCESS_KEY/ARK_SECRET_KEY/TENCENT_COS_*）
 
 环境变量:
   ARK_API_KEY            方舟 API Key（视频生成必需）
@@ -225,112 +226,78 @@ export function parseArgs(argv: string[]): CliArgs {
   return out;
 }
 
-async function loadEnvFile(filePath: string): Promise<Record<string, string>> {
+const SKILL_NAME = "yonge-video-gen";
+const PROVIDERS: Provider[] = ["ark", "openai"];
+const ALLOWED_KEYS = [
+  "version",
+  "default_provider",
+  "default_ratio",
+  "default_resolution",
+  "default_duration",
+  "default_generate_audio",
+  "default_watermark",
+  "default_model.ark",
+  "default_model.openai",
+  "batch.max_workers",
+];
+
+function optionalString(config: ConfigMap, key: string): string | null {
+  const value = getConfigValue(config, key);
+  if (value === undefined || value === null) return null;
+  if (typeof value === "object") throw new ConfigError(`${key} 应为单个值，不能是映射`);
+  return String(value);
+}
+
+function optionalNumber(config: ConfigMap, key: string): number | null {
+  const value = getConfigValue(config, key);
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number") throw new ConfigError(`${key} 应为数字，当前为 ${JSON.stringify(value)}`);
+  return value;
+}
+
+function optionalBoolean(config: ConfigMap, key: string): boolean | null {
+  const value = getConfigValue(config, key);
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "boolean") throw new ConfigError(`${key} 应为 true 或 false，当前为 ${JSON.stringify(value)}`);
+  return value;
+}
+
+/** 把通用解析结果转成本技能的类型。值类型不对时报错，不静默丢弃。 */
+export function toExtendConfig(config: ConfigMap): Partial<ExtendConfig> {
+  const provider = optionalString(config, "default_provider");
+  if (provider !== null && !PROVIDERS.includes(provider as Provider)) {
+    throw new ConfigError(`default_provider 只能是 ${PROVIDERS.join(" 或 ")}，当前为 ${provider}`);
+  }
+  const result: Partial<ExtendConfig> = {
+    version: optionalNumber(config, "version") ?? 1,
+    default_provider: provider as Provider | null,
+    default_ratio: optionalString(config, "default_ratio"),
+    default_resolution: optionalString(config, "default_resolution"),
+    default_duration: optionalNumber(config, "default_duration"),
+    default_generate_audio: optionalBoolean(config, "default_generate_audio"),
+    default_watermark: optionalBoolean(config, "default_watermark"),
+    default_model: {
+      ark: optionalString(config, "default_model.ark"),
+      openai: optionalString(config, "default_model.openai"),
+    },
+  };
+  const maxWorkers = optionalNumber(config, "batch.max_workers");
+  if (maxWorkers !== null) result.batch = { max_workers: maxWorkers };
+  return result;
+}
+
+/** 读取 .env 与 EXTEND.md。路径、优先级与写法限制由 lib/skill-config.ts 统一实现。 */
+export function loadConfig(options: { cwd?: string; home?: string } = {}): Partial<ExtendConfig> {
+  loadDotEnv(options);
+  const loaded = loadSkillConfig({ skill: SKILL_NAME, allowedKeys: ALLOWED_KEYS, ...options });
+  for (const warning of loaded.warnings) console.error(`警告：${warning}`);
+  if (!loaded.source) return {};
   try {
-    const content = await readFile(filePath, "utf8");
-    const env: Record<string, string> = {};
-    for (const line of content.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const idx = trimmed.indexOf("=");
-      if (idx === -1) continue;
-      let value = trimmed.slice(idx + 1).trim();
-      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1);
-      }
-      env[trimmed.slice(0, idx).trim()] = value;
-    }
-    return env;
-  } catch {
-    return {};
+    return toExtendConfig(loaded.config);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new ConfigError(`${loaded.source.path}：${message}`);
   }
-}
-
-async function loadEnv(): Promise<void> {
-  // 用户级在前，真实环境变量永远压过 .env 文件
-  const files = [
-    path.join(homedir(), ".yonge", ".yonge-skills", ".env"),
-    path.join(process.cwd(), ".yonge", ".yonge-skills", ".env"),
-  ];
-  for (const file of files) {
-    for (const [key, value] of Object.entries(await loadEnvFile(file))) {
-      if (!process.env[key]) process.env[key] = value;
-    }
-  }
-}
-
-export function extractYamlFrontMatter(content: string): string | null {
-  const match = content.match(/^---\s*\n([\s\S]*?)\n---\s*$/m);
-  return match ? match[1]! : null;
-}
-
-/** 只解析本技能 EXTEND.md 需要的两层结构，不引 YAML 依赖。 */
-export function parseSimpleYaml(yaml: string): Partial<ExtendConfig> {
-  const config: Partial<ExtendConfig> = {};
-  let parentKey: string | null = null;
-
-  for (const line of yaml.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes(":")) continue;
-    const indent = line.match(/^\s*/)?.[0].length ?? 0;
-    const colon = trimmed.indexOf(":");
-    const key = trimmed.slice(0, colon).trim();
-    const raw = trimmed.slice(colon + 1).replace(/\s+#.*$/, "").trim();
-
-    if (indent === 0) {
-      parentKey = raw === "" ? key : null;
-      if (raw === "") {
-        if (key === "default_model") config.default_model = { ark: null, openai: null };
-        continue;
-      }
-      const value = parseScalar(raw);
-      if (key === "version" && typeof value === "number") config.version = value;
-      if (key === "default_provider" && (value === "ark" || value === "openai")) config.default_provider = value;
-      if (key === "default_ratio") config.default_ratio = value === null ? null : String(value);
-      if (key === "default_resolution") config.default_resolution = value === null ? null : String(value);
-      if (key === "default_duration") config.default_duration = typeof value === "number" ? value : null;
-      if (key === "default_generate_audio") config.default_generate_audio = typeof value === "boolean" ? value : null;
-      if (key === "default_watermark") config.default_watermark = typeof value === "boolean" ? value : null;
-      continue;
-    }
-
-    if (parentKey === "default_model" && (key === "ark" || key === "openai")) {
-      const value = parseScalar(raw);
-      config.default_model = { ark: null, openai: null, ...(config.default_model ?? {}) };
-      config.default_model[key] = value === null ? null : String(value);
-    }
-    if (parentKey === "batch" && key === "max_workers") {
-      const value = parseScalar(raw);
-      config.batch = { ...(config.batch ?? {}), max_workers: typeof value === "number" ? value : null };
-    }
-  }
-  return config;
-}
-
-function parseScalar(raw: string): string | number | boolean | null {
-  if (raw === "" || raw === "null" || raw === "~") return null;
-  if (raw === "true") return true;
-  if (raw === "false") return false;
-  const unquoted = raw.replace(/^["'](.*)["']$/, "$1");
-  if (unquoted !== raw) return unquoted;
-  const num = Number(raw);
-  return Number.isFinite(num) && raw !== "" ? num : raw;
-}
-
-export async function loadExtendConfig(): Promise<Partial<ExtendConfig>> {
-  const candidates = [
-    path.join(process.cwd(), ".yonge", ".yonge-skills", "yonge-video-gen", "EXTEND.md"),
-    path.join(homedir(), ".yonge", ".yonge-skills", "yonge-video-gen", "EXTEND.md"),
-  ];
-  for (const file of candidates) {
-    try {
-      const yaml = extractYamlFrontMatter(await readFile(file, "utf8"));
-      if (yaml) return parseSimpleYaml(yaml);
-    } catch {
-      // 继续尝试下一个位置
-    }
-  }
-  return {};
 }
 
 export function detectProvider(args: CliArgs, config: Partial<ExtendConfig>): Provider {
@@ -342,7 +309,7 @@ export function detectProvider(args: CliArgs, config: Partial<ExtendConfig>): Pr
   const hasOpenAI = Boolean(process.env.OPENAI_API_KEY?.trim());
   if (hasArk) return "ark";
   if (hasOpenAI) return "openai";
-  throw new Error("未找到可用凭证。请配置 ARK_API_KEY（火山方舟）或 OPENAI_API_KEY，写入 ~/.yonge/.yonge-skills/.env 即可");
+  throw new Error("未找到可用凭证。请配置 ARK_API_KEY（火山方舟）或 OPENAI_API_KEY，写入 ~/.yonge/.yonge-skills/.env 即可（密钥不要写进 EXTEND.md）");
 }
 
 async function loadProviderModule(provider: Provider): Promise<ProviderModule> {
@@ -541,7 +508,8 @@ function sleep(ms: number): Promise<void> {
 }
 
 function resolveWorkerCount(tasks: PreparedTask[], jobs: number | null, config: Partial<ExtendConfig>): number {
-  const configured = Number(process.env.YONGE_VIDEO_GEN_MAX_WORKERS) || config.batch?.max_workers || DEFAULT_MAX_WORKERS;
+  // 优先级：--jobs / 批量文件 jobs > EXTEND.md > 环境变量 > 内置默认值
+  const configured = config.batch?.max_workers || Number(process.env.YONGE_VIDEO_GEN_MAX_WORKERS) || DEFAULT_MAX_WORKERS;
   const providerCap = Math.min(...tasks.map((task) => DEFAULT_RATE_LIMITS[task.provider].concurrency));
   return Math.max(1, Math.min(jobs ?? providerCap, configured, tasks.length));
 }
@@ -608,8 +576,7 @@ async function main(): Promise<void> {
     printUsage();
     return;
   }
-  await loadEnv();
-  const config = await loadExtendConfig();
+  const config = loadConfig();
 
   if (args.taskId) {
     const result = await resumeTask(args, config);

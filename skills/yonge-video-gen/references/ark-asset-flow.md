@@ -34,7 +34,7 @@ asset://<asset-id>  →  放进视频请求的 content
 
 ## 凭证配置
 
-方舟 AK/SK 与腾讯 COS 凭证放在 `~/.yonge/.yonge-skills/.env`（或项目级 `<cwd>/.yonge/.yonge-skills/.env`），与 API Key 集中一处维护：
+方舟 AK/SK 与腾讯 COS 凭证放在 `~/.yonge/.yonge-skills/.env`（或项目级 `<cwd>/.yonge/.yonge-skills/.env`，项目级覆盖用户级），与 API Key 集中一处维护。不要写进 EXTEND.md，写了会报错：
 
 ```ini
 # 方舟视频生成接口（必需，仅视频生成用）
@@ -55,7 +55,7 @@ TENCENT_COS_PREFIX=yonge-video-gen/   # 可选
 TENCENT_COS_DOMAIN=...                # 可选
 ```
 
-真实环境变量优先级高于 `.env` 文件，便于 CI 或临时覆盖：
+真实环境变量优先级高于 `.env` 文件（进程环境变量 > 项目 .env > 用户 .env），便于 CI 或临时覆盖：
 
 | 变量 | 覆盖项 |
 |------|--------|

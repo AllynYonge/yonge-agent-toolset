@@ -41,24 +41,28 @@ metadata:
 
 ## 步骤 0：加载偏好配置 ⛔ 阻断
 
-生成前必须完成。按顺序检查，命中即用：
+生成前必须完成。用 `--task-id` 续查已创建的任务不受此限制。
+
+按顺序检查，命中第一个就停，不合并：
 
 | 路径 | 作用域 |
 |------|--------|
 | `<cwd>/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md` | 项目 |
 | `~/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md` | 用户 |
 
-- **找到** → 加载并应用。`default_model.[provider]` 为 null 时只问模型。
-- **没找到** → 走首次配置流程（`references/config/first-time-setup.md`），用 AskUserQuestion 收集供应商 + 模型 + 分辨率 + 画幅 + 时长，写入 EXTEND.md 后继续。
+- **找到** → 加载并应用。`default_provider` 为空且两个供应商的密钥都存在时，只补问供应商。
+- **没找到** → 走首次设置（`references/config/first-time-setup.md`），收集供应商 + 画幅 + 分辨率 + 时长 + 保存位置，写入 EXTEND.md 后继续原任务。
 
-**EXTEND.md 字段**：默认供应商、默认画幅、默认分辨率、默认时长、是否生成音频、是否打水印、各供应商默认模型、批量并发上限。完整结构见 `references/config/preferences-schema.md`。
+**EXTEND.md 字段**：默认供应商、默认画幅、默认分辨率、默认时长、是否生成音频、是否打水印、各供应商默认模型、批量并发上限。结构见 `references/config/preferences-schema.md`。
+
+检查配置能否被正确读取（只列变量名，不显示密钥）：`${BUN_X} {baseDir}/scripts/lib/skill-config.ts --skill yonge-video-gen`
 
 ## 凭证
 
-`ARK_API_KEY` 是方舟视频生成的唯一必需项，从 https://console.volcengine.com/ark 获取。加载顺序：
+`ARK_API_KEY` 是方舟视频生成的唯一必需项，从 https://console.volcengine.com/ark 获取。密钥只放 `~/.yonge/.yonge-skills/.env`（项目级 `<cwd>/.yonge/.yonge-skills/.env` 可覆盖），不写进 EXTEND.md，写了会报错。加载顺序：
 
 ```
-CLI 参数 > EXTEND.md > 环境变量 > ~/.yonge/.yonge-skills/.env > <cwd>/.yonge/.yonge-skills/.env
+CLI 参数 > EXTEND.md > 环境变量 > <cwd>/.yonge/.yonge-skills/.env > ~/.yonge/.yonge-skills/.env > 内置默认值
 ```
 
 方舟 AK/SK 与腾讯 COS 凭证（asset:// 素材流程用）也放在同一份 `.env` 里，与 API Key 集中一处维护。详见 `references/ark-asset-flow.md`。

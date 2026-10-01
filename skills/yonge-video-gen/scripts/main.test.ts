@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
-import { createTaskArgs, detectProvider, extractYamlFrontMatter, parseArgs, parseSimpleYaml } from "./main";
+import { createTaskArgs, detectProvider, loadConfig, parseArgs, toExtendConfig } from "./main";
+import { parseExtend } from "./lib/skill-config";
 import {
   assertReferenceCounts,
   audioReferenceError,
@@ -130,10 +134,8 @@ batch:
 
 正文说明不参与解析。`;
 
-  test("提取 front matter 并解析", () => {
-    const yaml = extractYamlFrontMatter(extend);
-    expect(yaml).not.toBeNull();
-    const config = parseSimpleYaml(yaml!);
+  test("解析并转换为 ExtendConfig", () => {
+    const config = toExtendConfig(parseExtend(extend));
     expect(config.default_provider).toBe("ark");
     expect(config.default_ratio).toBe("9:16");
     expect(config.default_resolution).toBe("1080p");
@@ -143,6 +145,48 @@ batch:
     expect(config.default_model?.ark).toBe("doubao-seedance-1-0-pro-250528");
     expect(config.default_model?.openai).toBeNull();
     expect(config.batch?.max_workers).toBe(2);
+  });
+
+  test("值类型不对时报错，不静默丢弃", () => {
+    expect(() => toExtendConfig(parseExtend("---\nversion: 1\ndefault_provider: foo\n---\n"))).toThrow("default_provider");
+    expect(() => toExtendConfig(parseExtend("---\nversion: 1\ndefault_duration: long\n---\n"))).toThrow("default_duration");
+    expect(() => toExtendConfig(parseExtend("---\nversion: 1\ndefault_watermark: yes\n---\n"))).toThrow("default_watermark");
+  });
+
+  test("loadConfig：项目级 EXTEND.md 优先，项目 .env 覆盖用户 .env，进程环境变量不被覆盖", () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "yvg-config-"));
+    const cwd = path.join(base, "project");
+    const home = path.join(base, "home");
+    const write = (file: string, content: string) => {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, content);
+    };
+    write(path.join(cwd, ".yonge/.yonge-skills/yonge-video-gen/EXTEND.md"), "---\nversion: 1\ndefault_resolution: 1080p\n---\n");
+    write(path.join(home, ".yonge/.yonge-skills/yonge-video-gen/EXTEND.md"), "---\nversion: 1\ndefault_resolution: 480p\n---\n");
+    write(path.join(cwd, ".yonge/.yonge-skills/.env"), "YVG_TEST_SHARED=project\n");
+    write(path.join(home, ".yonge/.yonge-skills/.env"), "YVG_TEST_SHARED=user\nYVG_TEST_PROCESS=user\n");
+    process.env.YVG_TEST_PROCESS = "process";
+    try {
+      expect(loadConfig({ cwd, home }).default_resolution).toBe("1080p");
+      expect(process.env.YVG_TEST_SHARED).toBe("project");
+      expect(process.env.YVG_TEST_PROCESS).toBe("process");
+    } finally {
+      delete process.env.YVG_TEST_SHARED;
+      delete process.env.YVG_TEST_PROCESS;
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("loadConfig：密钥写进 EXTEND.md 时报错", () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), "yvg-config-"));
+    const file = path.join(base, "home/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, "---\nversion: 1\nark_api_key: abc\n---\n");
+    try {
+      expect(() => loadConfig({ cwd: path.join(base, "project"), home: path.join(base, "home") })).toThrow("密钥");
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 });
 

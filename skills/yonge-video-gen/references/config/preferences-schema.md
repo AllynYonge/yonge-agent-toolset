@@ -1,91 +1,76 @@
 ---
 name: preferences-schema
-description: yonge-video-gen 的 EXTEND.md YAML 结构
+description: yonge-video-gen 的 EXTEND.md 字段说明
 ---
 
-# 偏好配置结构
+# 偏好配置字段
 
-## 完整结构
+存放位置、查找顺序与优先级见 SKILL.md 步骤 0。
 
-```yaml
----
-version: 1
+## 字段表
 
-default_provider: null       # ark|openai|null（null = 按可用凭证自动选，ark 优先）
+| 字段 | 类型 | 默认值 | 等价环境变量 | 说明 |
+|------|------|--------|--------------|------|
+| `version` | 整数 | `1` | — | 配置格式版本。高于技能支持的版本时报错 |
+| `default_provider` | 字符串 \| null | 按可用凭证自动选，ark 优先 | — | `ark` \| `openai`。写其它值会报错 |
+| `default_ratio` | 字符串 \| null | `adaptive` | — | `16:9` \| `9:16` \| `1:1` \| `4:3` \| `3:4` \| `21:9` \| `adaptive`。含冒号，建议加引号 |
+| `default_resolution` | 字符串 \| null | `720p` | — | `480p` \| `720p` \| `1080p` |
+| `default_duration` | 整数 \| null | `5` | — | `4` \| `5` \| `6` \| `8` \| `10` \| `12` \| `15`，`-1` 表示由模型自适应 |
+| `default_generate_audio` | 布尔 \| null | `true` | — | 是否生成音频 |
+| `default_watermark` | 布尔 \| null | `false` | — | 是否打水印 |
+| `default_model.ark` | 字符串 \| null | `doubao-seedance-1-0-pro-250528` | `ARK_VIDEO_MODEL` | 方舟模型 ID，或 `ep-` 开头的推理接入点 ID |
+| `default_model.openai` | 字符串 \| null | `sora-2` | `OPENAI_VIDEO_MODEL` | OpenAI 兼容接口的模型 ID |
+| `batch.max_workers` | 整数 \| null | `3` | `YONGE_VIDEO_GEN_MAX_WORKERS` | 批量并发上限。实际并发还会受每个供应商的上限 2 限制 |
 
-default_ratio: null          # "16:9"|"9:16"|"1:1"|"4:3"|"3:4"|"21:9"|"adaptive"|null（null = adaptive）
+`null` 表示未设置，使用默认值列的值。
 
-default_resolution: null     # 480p|720p|1080p|null（null = 720p）
-
-default_duration: null       # 4|5|6|8|10|12|15|-1|null（null = 5，-1 = 模型自适应）
-
-default_generate_audio: null # true|false|null（null = true）
-
-default_watermark: null      # true|false|null（null = false）
-
-default_model:
-  ark: null                  # 如 "doubao-seedance-1-0-pro-250528"，或 ep- 开头的推理接入点 ID
-  openai: null               # 如 "sora-2"
-
-batch:
-  max_workers: 2             # 批量并发上限。视频接口限流严，不建议超过 2
----
-
-正文可以写任意说明，不参与解析。
-```
-
-## 存放位置
-
-按顺序检查，命中即用：
-
-| 路径 | 作用域 |
-|------|--------|
-| `<cwd>/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md` | 项目 |
-| `~/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md` | 用户 |
-
-## 优先级
-
-```
-CLI 参数 > EXTEND.md > 环境变量 > ~/.yonge/.yonge-skills/.env > <cwd>/.yonge/.yonge-skills/.env
-```
-
-EXTEND.md 压过环境变量：`default_model.ark` 设了值时，`ARK_VIDEO_MODEL` 不生效。
-
-## 解析说明
-
-只解析 front matter（`---` 之间的部分），且只认两层结构，不引 YAML 依赖。因此：
-
-- 不支持数组、锚点、多行字符串
-- 值可以带引号也可以不带；`null` 和 `~` 都表示未设置
-- 行内 `#` 后的内容当注释丢掉
-- 认不出的键会被忽略，不会报错
+EXTEND.md 覆盖环境变量：`default_model.ark` 写了 A，环境变量 `ARK_VIDEO_MODEL` 写了 B，最终用 A。
 
 ## 最小示例
 
-只固定分辨率和画幅：
+最少写这些就能运行：
 
 ```yaml
 ---
 version: 1
-default_resolution: 1080p
-default_ratio: "9:16"
 ---
 ```
 
-竖版短视频常用配置：
+## 常见覆盖示例
+
+竖版短视频，固定 1080p：
 
 ```yaml
 ---
 version: 1
-default_provider: ark
 default_ratio: "9:16"
 default_resolution: 1080p
-default_duration: 5
-default_generate_audio: true
-default_watermark: false
-default_model:
-  ark: doubao-seedance-1-0-pro-250528
-batch:
-  max_workers: 2
 ---
 ```
+
+## 密钥
+
+密钥不写进 EXTEND.md。写在 `~/.yonge/.yonge-skills/.env`，项目级 `<cwd>/.yonge/.yonge-skills/.env` 可覆盖：
+
+| 变量 | 用途 | 获取方式 |
+|------|------|----------|
+| `ARK_API_KEY` | 方舟视频生成（必需） | https://console.volcengine.com/ark → API Key 管理 |
+| `OPENAI_API_KEY` | OpenAI 兼容接口 | https://platform.openai.com/api-keys |
+| `ARK_ACCESS_KEY` / `ARK_SECRET_KEY` | asset:// 素材流程 | 见 `references/ark-asset-flow.md` |
+| `TENCENT_COS_*` | asset:// 素材流程 | 见 `references/ark-asset-flow.md` |
+
+## 写法限制
+
+解析器只支持 YAML 的一个子集。以下写法会直接报错，不会被静默忽略：
+
+- 数组（`- item`）、flow 写法（`{a: 1}` / `[1, 2]`）、多行字符串（`|` / `>`）、锚点与别名
+- Tab 缩进、同层缩进不一致、重复的键
+- 密钥类字段（`*_api_key`、`*_secret`、`*_token`、`*_password` 等）
+- 字段类型不对（如 `default_duration: long`、`default_watermark: yes`）
+
+其它说明：
+
+- 值可以带引号也可以不带；`null`、`~`、留空都表示未设置
+- 未加引号的值里，空格后的 `#` 起算注释
+- 未知字段会给出警告并被忽略
+- front matter 之后的正文不参与解析
