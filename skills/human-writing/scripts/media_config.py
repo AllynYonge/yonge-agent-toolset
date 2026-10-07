@@ -290,6 +290,15 @@ def visible_char_count(text: str) -> int:
     return len(re.sub(r"\s+", "", text))
 
 
+# 文末“参考来源”区不是正文，不计入 length。标题行可带 # 前缀，也可以是纯文字行。
+SOURCE_BLOCK = re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]*)?参考来源[ \t]*$")
+
+
+def strip_source_block(text: str) -> str:
+    match = SOURCE_BLOCK.search(text)
+    return text[: match.start()] if match else text
+
+
 def paragraph_number(text: str, offset: int) -> int:
     before = text[:offset]
     paragraphs = [p for p in re.split(r"\n\s*\n", before) if p.strip()]
@@ -325,13 +334,16 @@ def find_avoid_word_hits(text: str, words: List[str]) -> List[Dict[str, Any]]:
 
 def build_report(article: str, constraints: Dict[str, Any]) -> Dict[str, Any]:
     length_range = resolve_length_range(constraints["length"])
-    char_count = visible_char_count(article)
+    body = strip_source_block(article)
+    char_count = visible_char_count(body)
+    source_block_chars = visible_char_count(article) - char_count
     issues: List[Dict[str, Any]] = []
     warnings: List[Dict[str, Any]] = []
 
     length_result: Dict[str, Any] = {
         "configured_length": constraints["length"],
         "visible_char_count": char_count,
+        "source_block_chars": source_block_chars,
         "status": "skipped" if length_range is None else "pass",
     }
     if length_range is not None:

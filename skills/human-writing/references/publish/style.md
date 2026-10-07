@@ -15,7 +15,7 @@
 1. 用户本次请求的显式指令（"用犀利的风格"、"轻松一点"）
 2. EXTEND.md 中的 `custom_style`（内联自定义风格定义）
 3. EXTEND.md 中的 `writing_style`（内置风格预设名）→ 加载 `references/publish/styles/{name}.md`（脚本读 frontmatter 字段，正文是给代理读的风格说明）
-4. 都没有时不套用任何预设，按 SKILL.md 的默认写法写。内置预设只在选用时生效。改稿时原稿自己的声音按 `references/rewriter.md` 保留
+4. 都没有时不套用任何预设，按 SKILL.md 的默认写法写。内置预设只在选用时生效。改稿时原稿自己的声音按 `references/tasks/rewrite.md` 保留
 
 有风格时，声音参数取 resolver 返回的 `style`，不直接读取预设文件的 frontmatter。
 

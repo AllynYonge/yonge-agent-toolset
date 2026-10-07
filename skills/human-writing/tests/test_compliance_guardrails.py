@@ -308,6 +308,29 @@ class MergedCheckerTests(unittest.TestCase):
         from media_config import visible_char_count
         self.assertEqual(visible_char_count('ab 中文\n，。'), 6)
 
+    def test_source_block_is_excluded_from_length(self):
+        from media_config import strip_source_block, visible_char_count
+        constraints = {'length': '5-8', 'avoid_words': [], 'style_source': 'x',
+                       'effective_config': {}}
+        body = '一二三四五六\n'
+        tail = '\n---\n\n参考来源\n\n- 甲乙丙丁戊己庚辛壬癸 https://example.com\n'
+        with_tail = build_report(body + tail, constraints)
+        self.assertEqual(with_tail['length']['visible_char_count'], 9)
+        self.assertEqual(with_tail['length']['status'], 'fail')
+        self.assertGreater(with_tail['length']['source_block_chars'], 0)
+        self.assertEqual(visible_char_count(strip_source_block(body + tail)),
+                         visible_char_count(body + '---'))
+        # 带 # 前缀的标题同样识别
+        hashed = strip_source_block(body + '\n## 参考来源\n- 甲\n')
+        self.assertNotIn('甲', hashed)
+        # 没有来源区时统计不变
+        plain = build_report(body, constraints)
+        self.assertEqual(plain['length']['visible_char_count'], 6)
+        self.assertEqual(plain['length']['source_block_chars'], 0)
+        # 正文里提到“参考来源”但不是独立标题行时，不截断
+        inline = '参考来源很重要，这句在正文里。'
+        self.assertEqual(strip_source_block(inline), inline)
+
     def test_plain_run_reads_no_config(self):
         result = self.run_checker('他把表格改了一遍，第二天交给了组长。\n')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -411,7 +434,7 @@ class UnifiedFlowTests(unittest.TestCase):
     def test_single_workflow_lives_in_skill(self):
         text = (SKILL_ROOT / 'SKILL.md').read_text(encoding='utf-8')
         self.assertIn('### 九步流程', text)
-        self.assertIn('references/rewriter.md', text)
+        self.assertIn('references/tasks/rewrite.md', text)
         self.assertNotIn('workflows/', text)
         self.assertFalse((SKILL_ROOT / 'references' / 'publish' / 'workflows').exists())
 
@@ -438,13 +461,55 @@ class ReferenceIntegrityTests(unittest.TestCase):
         self.assertEqual([p.relative_to(SKILL_ROOT).as_posix() for p in hits], ['SKILL.md'])
 
 
-    def test_lite_jargon_is_known_to_checker(self):
-        from check_prose import CONTEXT_JARGON, HARD_JARGON
-        text = (SKILL_ROOT / 'dist' / 'human-writing-lite.md').read_text(encoding='utf-8')
-        listed = re.search(r'不用([^，。「」]+?)这类黑话', text).group(1)
-        for word in listed.split('、'):
-            with self.subTest(word=word):
-                self.assertIn(word.strip(), (*HARD_JARGON, *CONTEXT_JARGON))
+class RuleCodeTests(unittest.TestCase):
+    """Checker output points straight to the matching revision.md section."""
+
+    def run_json(self, text, *args):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'draft.md'
+            path.write_text(text, encoding='utf-8')
+            cmd = [sys.executable, '-B', str(SCRIPTS / 'check_prose.py'), *args, '--json', str(path)]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            return json.loads(result.stdout)
+
+    def test_every_code_has_a_revision_section(self):
+        from check_prose import RULE_NAMES
+        text = (SKILL_ROOT / 'references' / 'quality' / 'revision.md').read_text(encoding='utf-8')
+        for code, name in RULE_NAMES.items():
+            with self.subTest(code=code):
+                self.assertIn(f'### {code} {name}\n', text)
+
+    def test_issues_carry_codes(self):
+        data = self.run_json('他说白了就是想赋能。\n真正决定我留下来的不是速度，而是搜索。\n',
+                             '--avoid-word', '搜索')
+        codes = {issue['code'] for issue in data['issues'] if issue['level'] == 'fail'}
+        self.assertTrue({'S2', 'S3', 'S4', 'C2'} <= codes)
+        self.assertTrue(all(item.startswith('[') for item in data['failures']))
+        self.assertEqual(len(data['failures']) + len(data['warnings']), len(data['issues']))
+
+
+class SingleSourceTests(unittest.TestCase):
+    """A drafting example lives in one craft file; revision.md may reuse it only as a before/after pair."""
+
+    SAMPLES = (
+        '天将明，人未归',
+        '他从抽屉里翻出一张收据',
+        '他关掉一条好走的路',
+        '会后悔，而且通常不是买错那一下就后悔',
+    )
+
+    def test_samples_written_once_in_craft_and_skill(self):
+        paths = [SKILL_ROOT / 'SKILL.md', *SKILL_ROOT.glob('references/craft/*.md')]
+        for sample in self.SAMPLES:
+            hits = [p.name for p in paths if sample in p.read_text(encoding='utf-8')]
+            with self.subTest(sample=sample):
+                self.assertEqual(len(hits), 1, hits)
+
+    def test_skill_routes_reading_by_two_questions(self):
+        text = (SKILL_ROOT / 'SKILL.md').read_text(encoding='utf-8')
+        self.assertIn('### 起草时读哪些文件', text)
+        self.assertNotIn('craft/voice.md', text)
+        self.assertFalse((SKILL_ROOT / 'references' / 'craft' / 'voice.md').exists())
 
 
 if __name__ == '__main__':

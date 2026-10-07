@@ -227,7 +227,7 @@ output_dir: /Users/me/articles
 
 ### custom_style
 
-内联自定义写作风格，字段结构与 `references/publish/styles/*.md` 的 frontmatter 相同（custom_style 是 EXTEND.md 里的 dict，只有 frontmatter 字段、没有正文——resolver 返回完整风格，并提取 `words_to_avoid` 和可选的 `compliance_guardrails`；后者由代理做语义审核）。设置后优先级高于 `writing_style` 风格预设名。这是自定义风格字段结构的权威模板——`references/publish/voice.md` 只列字段名，需要照抄完整结构时读这里。
+内联自定义写作风格，字段结构与 `references/publish/styles/*.md` 的 frontmatter 相同（custom_style 是 EXTEND.md 里的 dict，只有 frontmatter 字段、没有正文——resolver 返回完整风格，并提取 `words_to_avoid` 和可选的 `compliance_guardrails`；后者由代理做语义审核）。设置后优先级高于 `writing_style` 风格预设名。这是自定义风格字段结构的权威模板——`references/publish/style.md` 只列字段名，需要照抄完整结构时读这里。
 
 ```yaml
 custom_style:
@@ -306,7 +306,7 @@ wechat-living:
 
 创建和改写完成后，主代理运行 `scripts/check_prose.py {constraint_check_args}` 确定性扫描最终正文。规避词部分只检查 EXTEND.md、active 账号、custom_style 和风格预设中可逐字匹配的词；结构、句法和语气层面的 AI 痕迹由同一脚本的硬禁令与形状检查处理。
 
-账号规避词来自用户配置，不属于技能内置的硬禁词表，不受 `references/revision.md`「检查脚本里的硬禁词必须与本节完全一致」的约束。命中 `avoid_words` 或 `custom_style.words_to_avoid` 时，先按硬约束修复；只有当修复会删减事实或改变立场时，才进入待确认清单。
+账号规避词来自用户配置，不属于技能内置的硬禁词表，不受 `references/quality/revision.md`「检查脚本里的硬禁词必须与本节完全一致」的约束。命中 `avoid_words` 或 `custom_style.words_to_avoid` 时，先按硬约束修复；只有当修复会删减事实或改变立场时，才进入待确认清单。
 
 ### default_profile
 

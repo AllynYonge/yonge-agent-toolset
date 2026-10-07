@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """检查中文成稿的硬禁令与常见模型化形状。只报警，不自动改文。
 
-默认只检查 SKILL.md 与 references/revision.md 写明的硬禁令和形状提醒，不读任何配置。
+默认只检查 SKILL.md 与 references/quality/revision.md 写明的硬禁令和形状提醒，不读任何配置。
+每条结果带 revision.md 的规则编号，--json 输出的 issues 里同时给出 code、name 和 level。
 传入 --profile、--extend、--length、--writing-style 或 --avoid-word 时，额外检查
 账号配置的篇幅与规避词（配置解析见 media_config.py）。
 """
@@ -274,6 +275,27 @@ ASSISTANT_RESIDUE = (
 )
 
 
+# 每条结果的编号与 references/quality/revision.md 的小节一一对应，修改时按编号找修法。
+RULE_NAMES = {
+    "S1": "冒号与破折号",
+    "S2": "翻案腔",
+    "S3": "口头路标",
+    "S4": "黑话",
+    "S5": "排比",
+    "S6": "假深刻",
+    "S7": "名词化与翻译腔",
+    "S8": "主干太晚",
+    "S9": "节奏",
+    "S10": "比喻换场",
+    "S11": "协作残留",
+    "F1": "无名权威与来源",
+    "C1": "篇幅",
+    "C2": "规避词",
+}
+
+CONSTRAINT_CODES = {"length": "C1", "avoid_word": "C2"}
+
+
 @dataclass
 class Paragraph:
     position: int
@@ -531,6 +553,18 @@ def main() -> int:
 
     failures = []
     warnings = []
+    issues = []
+
+    def record(level: str, code: str, message: str) -> None:
+        name = RULE_NAMES[code]
+        issues.append({"code": code, "name": name, "level": level, "message": message})
+        (failures if level == "fail" else warnings).append(f"[{code} {name}] {message}")
+
+    def fail(code: str, message: str) -> None:
+        record("fail", code, message)
+
+    def warn(code: str, message: str) -> None:
+        record("warn", code, message)
 
     quote_colons = []
     for symbol, label in FORBIDDEN_PUNCTUATION.items():
@@ -548,22 +582,22 @@ def main() -> int:
             matches = hard
         if matches:
             lines = "、".join(str(line_number(text, match.start())) for match in matches[:8])
-            failures.append(f"{label}共 {len(matches)} 处，出现在第 {lines} 行。")
+            fail("S1", f"{label}共 {len(matches)} 处，出现在第 {lines} 行。")
     if quote_colons:
         lines = "、".join(
             str(line_number(text, match.start())) for match in quote_colons[:8]
         )
-        warnings.append(
+        warn("S1",
             f"引出原话的冒号 {len(quote_colons)} 处，第 {lines} 行。确认引号里确实是原话，且不是提示性用法。"
         )
 
     stop_matches = non_overlapping_terms(prose, HARD_STOPS)
     for position, phrase in stop_matches:
-        failures.append(f"硬停词，第 {line_number(text, position)} 行，{phrase}")
+        fail("S3", f"硬停词，第 {line_number(text, position)} 行，{phrase}")
 
     jargon_matches = non_overlapping_terms(prose, HARD_JARGON)
     for position, phrase in jargon_matches:
-        failures.append(f"黑话，第 {line_number(text, position)} 行，{phrase}")
+        fail("S4", f"黑话，第 {line_number(text, position)} 行，{phrase}")
 
     context_jargon_matches = non_overlapping_terms(prose, CONTEXT_JARGON)
     hard_spans = [
@@ -587,21 +621,21 @@ def main() -> int:
                 for position, _ in context_jargon_matches[:8]
             )
         )
-        warnings.append(
+        warn("S4",
             f"有 {len(context_jargon_matches)} 处词语需要结合语境判断。"
             f"第 {lines} 行出现 {samples}。本义准确时保留，用来抬价时改写。"
         )
 
     road_signs = all_matches(prose, ROAD_SIGN_PATTERNS)
     for match in road_signs:
-        failures.append(
+        fail("S3",
             f"模型路标，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group().lstrip(ROAD_STRIP_CHARS))}”"
         )
 
     pivots = all_matches(prose, PIVOT_PATTERNS)
     for match in pivots:
-        failures.append(
+        fail("S2",
             f"禁用翻案句，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group())}”"
         )
@@ -617,14 +651,14 @@ def main() -> int:
         semantic_pivots.append(match)
         occupied_spans.append(match.span())
     for match in semantic_pivots:
-        warnings.append(
+        warn("S2",
             f"疑似翻案腔变形，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group(), 44)}”。先立误解再推翻就改成正面陈述，正常用法保留。"
         )
 
     anaphoras = anaphora_runs(prose)
     for match in anaphoras[:4]:
-        warnings.append(
+        warn("S5",
             f"三连以上同构排比，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group(), 44)}”。留两项，第三项换说法或删掉。"
         )
@@ -632,14 +666,14 @@ def main() -> int:
     lyric_matches = non_overlapping_terms(prose, LYRIC_WORDS)
     if len(lyric_matches) >= 2:
         samples = "、".join(dict.fromkeys(term for _, term in lyric_matches))
-        warnings.append(
+        warn("S6",
             f"模型偏爱的抒情词 {len(lyric_matches)} 处。{samples}。"
             "写具体事物时保留，给抽象概念穿衣服时删掉。"
         )
 
     nominalizations = all_matches(prose, NOMINALIZATION_PATTERNS)
     for match in nominalizations[:4]:
-        warnings.append(
+        warn("S7",
             f"名词化句式，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group(), 36)}”。还原成直接的动词。"
         )
@@ -652,7 +686,7 @@ def main() -> int:
                 term for _, term in conjunction_hits
             ).most_common(4)
         )
-        warnings.append(
+        warn("S9",
             f"连词密度偏高，每千字 {len(conjunction_hits) * 1000 // total_han} 个。{samples}。"
             "中文小句靠语序和事理相接，删掉一半试试。"
         )
@@ -661,13 +695,13 @@ def main() -> int:
     highlight_limit = max(3, total_han // 700)
     if len(highlights) > highlight_limit:
         samples = "、".join(dict.fromkeys(match.group() for match in highlights[:6]))
-        warnings.append(
+        warn("S6",
             f"「」括起的短语共 {len(highlights)} 处。{samples}。太密说明在批量造金句。"
         )
 
     cv_result = sentence_length_cv(prose)
     if cv_result and cv_result[0] < 0.42:
-        warnings.append(
+        warn("S9",
             f"全文 {cv_result[1]} 个句子长度过于接近（变异系数 {cv_result[0]:.2f}）。"
             "人写的段落里十个字的句子会挨着四十个字的句子，放开几句，压短几句。"
         )
@@ -676,7 +710,7 @@ def main() -> int:
     marker_limit = max(2, total_han // 900)
     if len(marker_matches) > marker_limit:
         samples = "、".join(dict.fromkeys(term for _, term in marker_matches))
-        warnings.append(
+        warn("S3",
             f"洞察路标共 {len(marker_matches)} 处，当前提醒线为 {marker_limit} 处。"
             f"重点检查 {samples}。"
         )
@@ -688,7 +722,7 @@ def main() -> int:
             f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 44)}”"
             for match in left_branches[:4]
         )
-        warnings.append(
+        warn("S8",
             f"长前置成分共 {len(left_branches)} 处，可能让主干来得太晚。{samples}"
         )
 
@@ -699,7 +733,7 @@ def main() -> int:
             f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 44)}”"
             for match in dense_de[:4]
         )
-        warnings.append(
+        warn("S8",
             f"有 {len(dense_de)} 个长句包含四个以上的“的”，可能要先交代人和动作。{samples}"
         )
 
@@ -708,14 +742,14 @@ def main() -> int:
         one_sentence = sum(paragraph.sentences <= 1 for paragraph in paragraphs)
         ratio = one_sentence / len(paragraphs)
         if ratio >= 0.75:
-            warnings.append(
+            warn("S9",
                 f"可识别段落中有 {ratio:.0%} 只有一句话，可能形成统一的短段鼓点。"
             )
 
     streak = short_streak(paragraphs)
     if streak:
         first = streak[0]
-        warnings.append(
+        warn("S9",
             f"从第 {line_number(text, first.position)} 行起连续出现 {len(streak)} 个短促单句段，"
             "检查是否在排队喊结论。"
         )
@@ -725,7 +759,7 @@ def main() -> int:
     if repeated:
         details = "、".join(f"{opener} {count} 次" for opener, count in repeated)
         first_position = min(opener_examples[opener] for opener, _ in repeated)
-        warnings.append(
+        warn("S9",
             f"段落开场重复，从第 {line_number(text, first_position)} 行附近开始。{details}。"
         )
 
@@ -733,21 +767,21 @@ def main() -> int:
     if metaphors:
         window, fields = metaphors
         samples = "、".join(dict.fromkeys(hit[2] for hit in window))
-        warnings.append(
+        warn("S10",
             f"八百字内出现 {len(fields)} 套借喻。{'、'.join(sorted(fields))}。"
             f"例词有 {samples}。"
         )
 
     authority_matches = all_matches(prose, ANONYMOUS_AUTHORITY_PATTERNS)
     for match in authority_matches[:4]:
-        warnings.append(
+        warn("F1",
             f"无名权威，第 {line_number(text, match.start())} 行，“{match.group()}”。"
             "后面有具名的人、机构、报告或日期就保留，没有来源就删去这层说法并降低断言强度。"
         )
 
     hype_matches = non_overlapping_terms(prose, HYPE_TERMS)
     for position, term in hype_matches[:4]:
-        warnings.append(
+        warn("S6",
             f"意义拔高，第 {line_number(text, position)} 行，{term}。"
             "写清变化和受影响的人，写不出来就删。"
         )
@@ -758,7 +792,7 @@ def main() -> int:
             f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 24)}”"
             for match in translationese[:4]
         )
-        warnings.append(
+        warn("S7",
             f"翻译腔骨架共 {len(translationese)} 处。{samples}。找出谁做了什么，按人和动作重写。"
         )
 
@@ -766,7 +800,7 @@ def main() -> int:
     adverb_limit = max(2, total_han // 1000)
     if len(adverb_matches) >= adverb_limit:
         samples = "、".join(dict.fromkeys(term for _, term in adverb_matches))
-        warnings.append(
+        warn("S7",
             f"空洞副词共 {len(adverb_matches)} 处。{samples}。删掉以后意思不变就删。"
         )
 
@@ -784,22 +818,22 @@ def main() -> int:
                 opener for _, opener in list_openers
             ).items()
         )
-        warnings.append(
+        warn("S9",
             f"清单式段落开头 {len(list_openers)} 处，从第 {line_number(text, list_openers[0][0])} 行附近开始。"
             f"{details}。教程按步骤走时保留，其余让事理自己接上。"
         )
 
     residue_matches = non_overlapping_terms(prose, ASSISTANT_RESIDUE)
     for position, term in residue_matches[:4]:
-        warnings.append(
+        warn("S11",
             f"聊天协作残留或引流号召，第 {line_number(text, position)} 行，{term}。删掉，或说清具体理由。"
         )
 
     if constraint_report is not None:
         for issue in constraint_report["issues"]:
-            failures.append(issue["message"])
+            fail(CONSTRAINT_CODES[issue["type"]], issue["message"])
         for issue in constraint_report["warnings"]:
-            warnings.append(issue["message"])
+            warn(CONSTRAINT_CODES[issue["type"]], issue["message"])
 
     summary = (
         f"翻案句 {len(pivots)}，翻案腔变形 {len(semantic_pivots)}，"
@@ -819,6 +853,7 @@ def main() -> int:
             "han_count": total_han,
             "failures": failures,
             "warnings": warnings,
+            "issues": issues,
         }
         if constraint_report is not None:
             payload["constraints"] = {
@@ -835,10 +870,13 @@ def main() -> int:
             print("篇幅未设目标，跳过")
         else:
             print(
-                f"篇幅 {length['visible_char_count']} 字（全部非空白字符），"
+                f"篇幅 {length['visible_char_count']} 字（非空白字符，不含参考来源区"
+                f"{length.get('source_block_chars', 0)} 字），"
                 f"目标 {length['min']}-{length['max']}"
             )
     print(summary)
+    if failures or warnings:
+        print("每项开头的编号对应 references/quality/revision.md 的同名小节，按编号找修法。")
 
     if failures:
         print("\n需要修改")

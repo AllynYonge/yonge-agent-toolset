@@ -7,7 +7,7 @@
 
 ## 审核模式入口
 
-用户要求「审核 / check / audit / review」时进入本模式。本模式只审合规红线与内容质量。用户只想查 AI 痕迹（「看看像不像AI / 查AI痕迹」）时不进入本模式，改为读取 `references/revision.md` 并运行 `scripts/check_prose.py`，只报告问题。
+用户要求「审核 / check / audit / review」时进入本模式。本模式只审合规红线与内容质量。用户只想查 AI 痕迹（「看看像不像AI / 查AI痕迹」）时不进入本模式，改为按 `references/quality/revision.md`「只查 AI 痕迹的报告」运行 `scripts/check_prose.py`、做句子层检查并出报告，只报告问题。
 
 1. **加载合规清单**：独立审核按 SKILL.md「九步流程」第 1 步获取 active profile 的 `compliance_guardrails`；创建或改写后的审核沿用当前已确认的任务清单。补入用户本次明确边界，按 `references/publish/overview.md`「合规红线」处理冲突。无额外规则时显式使用 `[]`，解析失败时不继续审核。
 2. **派发审核任务**：按下文「调度规则」派发，必须传入完整 `compliance_guardrails`，而非规则摘要或仅条款编号。

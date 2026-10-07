@@ -2,7 +2,7 @@
 
 本文件说明 human-writing 的账号配置、发布平台形态、合规红线、`length` 与多账号。这些能力在命中条件时才生效，任务怎么走、读哪些文件以 SKILL.md「九步流程」为准。
 
-它们都不改变写作内核。第一关材料检查、说话位置、事实边界、`references/revision.md` 的七遍改稿和「成稿绝对不能出现」照常执行，`references/publish/` 下的任何文件都不能放松它们。风格参数、平台文件和选题模板里的示例句、保留词和论点句式命中硬禁令时一律不执行，唯一的格式例外见 SKILL.md 同一节的平台格式白名单。
+它们都不改变写作内核。第一关材料检查、说话位置、事实边界、`references/quality/revision.md` 的三层改稿检查和「成稿绝对不能出现」照常执行，`references/publish/` 下的任何文件都不能放松它们。风格参数、平台文件和选题模板里的示例句、保留词和论点句式命中硬禁令时一律不执行，唯一的格式例外见 SKILL.md 同一节的平台格式白名单。
 
 ## 两条分开处理的原则
 
@@ -13,7 +13,7 @@
 
 涉及对应环节前 MUST 加载完整文件。
 
-- **写作风格**（“谁在说话”，跨平台跨媒介不变）：风格来源优先级、内置预设（`lucid-tech` / `life-observer` / `sharp-commentary` / `warm-narrative`）、自定义风格结构、样本提取红线、风格与平台冲突解决。见 [voice.md](voice.md)。
+- **写作风格**（“谁在说话”，跨平台跨媒介不变）：风格来源优先级、内置预设（`lucid-tech` / `life-observer` / `sharp-commentary` / `warm-narrative`）、自定义风格结构、样本提取红线、风格与平台冲突解决。见 [style.md](style.md)。
 - **平台 × 媒介**（“在哪里说话 × 用什么载体说话”）：平台容器（分发机制、用户心智、内容规范、交互偏好）加媒介载体（叙事结构、开篇钩子、篇幅特性、起草侧重），每个发布形态一个数据文件。见 [platforms/](platforms/)。
 - **文件输出与多形态聚合**：`output_dir` 保存规则、草稿标记、同一内容的多个形态聚合到一个文件与就地追加规则。见 [output.md](output.md)。
 
@@ -103,7 +103,7 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 
 ### 改写深度控制（deep）
 
-`deep` 控制改稿对原文的改动幅度，仅作用于改稿。三个档位的含义、开放条件和执行方式见 `references/rewriter.md`「改写深度」。
+`deep` 控制改稿对原文的改动幅度，仅作用于改稿。三个档位的含义、开放条件和执行方式见 `references/tasks/rewrite.md`「改写深度」。
 
 ## 平台与媒介检测
 
@@ -115,7 +115,7 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 | 小红书/xhs/RED/种草/笔记/分享帖 | 小红书 |
 | 无明确信号 | active profile 的 `platform`；再无则没有目标平台，不套用平台形态 |
 
-其他平台：继续但不应用平台特定规则，按 `references/formats.md` 处理。
+其他平台：继续但不应用平台特定规则，按 `references/craft/format.md` 处理。
 
 ### 媒介检测
 
