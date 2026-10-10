@@ -1,6 +1,6 @@
 # 声音风格
 
-本文件只管"谁在说话"的声音身份，也就是风格预设、自定义风格和样本提取。写作风格跨平台、跨媒介不变；发布形态约束见 [platforms/](platforms/)。风格只调整语域、立场、节奏、标志手法和用词，不能放松这些底线。
+本文件只管"谁在说话"的声音身份，也就是自定义风格和样本提取。写作风格跨平台、跨媒介不变；发布形态约束见 [platforms/](platforms/)。风格只调整语域、立场、节奏、标志手法和用词，不能放松这些底线。
 
 风格参数与 SKILL.md「##成稿绝对不能出现」冲突时，以该节禁令为准。`words_to_keep`、`favorite_moves`、`preferred_opening` 里出现该节覆盖的词语和句式时，一律不执行。
 
@@ -14,21 +14,11 @@
 
 1. 用户本次请求的显式指令（"用犀利的风格"、"轻松一点"）
 2. EXTEND.md 中的 `custom_style`（内联自定义风格定义）
-3. EXTEND.md 中的 `writing_style`（内置风格预设名）→ 加载 `references/publish/styles/{name}.md`（脚本读 frontmatter 字段，正文是给代理读的风格说明）
-4. 都没有时不套用任何预设，按 SKILL.md 的默认写法写。内置预设只在选用时生效。改稿时原稿自己的声音按 `references/tasks/rewrite.md` 保留
+3. 都没有时不套用任何风格，按 SKILL.md 的默认写法写。改稿时原稿自己的声音按 `references/tasks/rewrite.md` 保留
 
-有风格时，声音参数取 resolver 返回的 `style`，不直接读取预设文件的 frontmatter。
+没有内置风格预设。EXTEND.md 里的 `writing_style` 字段已取消，resolver 遇到会报错，提示改用 `custom_style`。
 
-### 内置风格预设
-
-存放于 `references/publish/styles/`，可直接在 `writing_style` 中引用：
-
-| 预设名 | 适合场景 |
-|--------|----------|
-| `lucid-tech` | 技术分析、产品评测、行业拆解 |
-| `life-observer` | 生活方式、个人成长、日常分享 |
-| `sharp-commentary` | 行业评论、观点输出、现象批评 |
-| `warm-narrative` | 故事型内容、人物特写、回忆录 |
+有风格时，声音参数取 resolver 返回的 `style`。
 
 ### 自定义风格结构
 
@@ -61,4 +51,4 @@
 |---------|---------|
 | 写作风格要求长段落，平台/媒介要求短段落 | 平台/媒介优先——容器与载体限制 |
 | 写作风格要求正式，平台建议口语化 | 写作风格优先——声音身份 |
-| 风格预设的 `preferred_opening` 与内容需要矛盾 | 内容需要优先——偏好非强制 |
+| 风格的 `preferred_opening` 与内容需要矛盾 | 内容需要优先——偏好非强制 |

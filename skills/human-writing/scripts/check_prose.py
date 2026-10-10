@@ -3,97 +3,21 @@
 
 默认只检查 SKILL.md 与 references/quality/revision.md 写明的硬禁令和形状提醒，不读任何配置。
 每条结果带 revision.md 的规则编号，--json 输出的 issues 里同时给出 code、name 和 level。
-传入 --profile、--extend、--length、--writing-style 或 --avoid-word 时，额外检查
-账号配置的篇幅与规避词（配置解析见 media_config.py）。
+传入 --profile、--extend 或 --length 时，额外检查账号配置的篇幅与规避词。
+配置解析由 resolve_preferences.py 负责，本脚本不重复实现。
 """
 
 from __future__ import annotations
 
 import argparse
-import collections
 import json
 import os
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Dict, List
 
-
-HARD_STOPS = (
-    "说白了",
-    "说穿了",
-    "先说结论",
-)
-
-HARD_JARGON = (
-    "赋能",
-    "抓手",
-    "商业闭环",
-    "价值闭环",
-    "能力沉淀",
-    "拉通",
-    "底层逻辑",
-    "顶层设计",
-    "认知跃迁",
-    "价值释放",
-    "能力建设",
-    "降本增效",
-    "内容矩阵",
-    "全链路",
-    "组合拳",
-    "打开想象空间",
-    "结构性机会",
-    "关键命题",
-    "深层逻辑",
-    "技术底座",
-    "公共底座",
-    "技术主权",
-    "单点风险",
-    "主脊柱",
-    "材料锚点",
-    "认知增量",
-    "迭代闭环",
-)
-
-CONTEXT_JARGON = (
-    "沉淀",
-    "颗粒度",
-    "对齐",
-    "协同",
-    "链路",
-    "生态位",
-    "心智",
-    "范式",
-    "方法论",
-    "核心变量",
-    "打法",
-    "想象空间",
-    "闭环",
-    "不丢",
-)
-
-LYRIC_WORDS = (
-    "安放",
-    "抵达",
-    "微光",
-    "褶皱",
-    "丰盈",
-    "滚烫",
-    "轻盈",
-    "赤裸",
-    "剥开",
-)
-
-ROAD_SIGNS = (
-    "更微妙的是",
-    "还有一层",
-    "只说对了一半",
-    "值得注意的是",
-    "需要指出的是",
-    "从某种意义上说",
-)
-
-ROAD_STRIP_CHARS = "。！？!? \n"
 
 # 平台信息标签：行首 emoji 或符号，加不超过六个字的标签，紧跟冒号，如“📍地址：”。
 # 只在 --platform-labels 打开时放行，规则见 SKILL.md「成稿绝对不能出现」的平台格式例外。
@@ -141,154 +65,21 @@ NOMINALIZATION_PATTERNS = (
     re.compile(r"具有[^。，！？\n]{0,10}(?:意义|价值)"),
 )
 
-CONJUNCTIONS = (
-    "因为",
-    "所以",
-    "但是",
-    "然而",
-    "同时",
-    "此外",
-    "而且",
-    "并且",
-    "因此",
-    "不仅",
-)
-
-ROAD_SIGN_PATTERNS = (
-    re.compile(
-        rf"(?:^|[。！？!?]\s*){re.escape(ROAD_SIGNS[0])}[^。！？!?\n]{{0,24}}",
-        re.MULTILINE,
-    ),
-    re.compile(
-        rf"(?:^|[。！？!?]\s*){re.escape(ROAD_SIGNS[1])}(?=(?:更|原因|问题|意思|考虑|变化|逻辑|价值|作用|风险|影响|值得|很少|不容易|常被|往往))[^。！？!?\n]{{0,24}}",
-        re.MULTILINE,
-    ),
-    *(
-        re.compile(
-            rf"(?:^|[。！？!?]\s*){re.escape(phrase)}[^。！？!?\n]{{0,24}}",
-            re.MULTILINE,
-        )
-        for phrase in ROAD_SIGNS[2:]
-    ),
-)
-
-SOFT_MARKERS = (
-    "真正",
-    "本质上",
-    "更深层次",
-    "归根结底",
-    "换句话说",
-    "不可否认",
-    "核心是",
-    "关键在于",
-    "这意味着",
-)
-
-REPEATED_OPENERS = (
-    "其实",
-    "不过",
-    "当然",
-    "所以",
-    "但是",
-    "后来",
-    "当时",
-    "很多人",
-    "问题是",
-    "更重要的是",
-    "说到这里",
-)
-
 LEFT_BRANCH_PATTERNS = (
     re.compile(r"(?:^|[。！？]\s*)在[^，。！？\n]{12,70}(?:以后|之后|之前|以前|过程中|情况下|背景下)，"),
     re.compile(r"(?:^|[。！？]\s*)那些[^，。！？\n]{10,60}的[^，。！？\n]{2,30}[，。]"),
     re.compile(r"(?:^|[。！？]\s*)(?:真正|最终|最后)让[^，。！？\n]{8,70}的，是"),
 )
 
-METAPHOR_FIELDS = {
-    "温度": ("降温", "升温", "冷却", "余温", "温度最高"),
-    "生死战争": ("杀死", "死因", "枪响", "开火", "战场", "引爆", "弹药"),
-    "建筑灾害": ("坍塌", "崩塌", "地基", "砖头", "支柱", "废墟"),
-    "仓储租赁": ("仓库", "库房", "租金", "取货", "入库", "库存"),
-    "道路竞赛": ("赛道", "跑道", "岔路", "十字路口", "终点线", "门票"),
-    "机器器官": ("齿轮", "引擎", "发动机", "血管", "骨架", "肌肉"),
-    "海洋航行": ("蓝海", "浪潮", "潮水", "航船", "灯塔", "彼岸"),
-}
-
-ANONYMOUS_AUTHORITY_PATTERNS = (
-    re.compile(r"(?:有|不少|很多|一些)?专家(?:表示|指出|认为|称)"),
-    re.compile(r"业内人士(?:表示|指出|认为|称)"),
-    re.compile(r"业[界内](?:普遍|一致)认为"),
-    re.compile(r"(?:相关|有|多项)?研究(?:表明|显示|发现)"),
-    re.compile(r"(?:有|相关)?数据显示"),
-    re.compile(r"据了解"),
-)
-
-HYPE_TERMS = (
-    "里程碑式",
-    "里程碑意义",
-    "划时代",
-    "革命性",
-    "开创性",
-    "奠定坚实基础",
-    "奠定了坚实基础",
-    "谱写新篇章",
-    "机遇与挑战并存",
-    "前景广阔",
-    "前景十分广阔",
-)
-
-TRANSLATIONESE_PATTERNS = (
-    re.compile(r"(?:将|把)(?:目光|视线|注意力)(?:转向|投向|放在|集中在)"),
-    re.compile(r"一(?:个|种|项)令人[^，。！？\n]{1,8}的"),
-    re.compile(r"一(?:个|种|项)不可(?:忽视|否认|小觑)的"),
-    re.compile(r"(?:这种|该|这一)[^，。！？\n]{0,6}(?:可能性|有效性|重要性|必要性)(?:暗示|体现|在于|表明)"),
-)
-
-EMPTY_ADVERBS = (
-    "积极地",
-    "有效地",
-    "充分地",
-    "深入地",
-    "全面地",
-    "切实地",
-)
-
-LIST_OPENERS = (
-    "首先",
-    "其次",
-    "再次",
-    "最后",
-    "总之",
-    "此外",
-)
-
-ASSISTANT_RESIDUE = (
-    "希望对你有帮助",
-    "希望对你有所帮助",
-    "希望这篇文章对你有帮助",
-    "下面我们来看看",
-    "接下来聊聊",
-    "接下来我们聊聊",
-    "建议收藏",
-    "评论区聊聊",
-    "看完你就懂了",
-)
-
-
 # 每条结果的编号与 references/quality/revision.md 的小节一一对应，修改时按编号找修法。
 RULE_NAMES = {
     "S1": "冒号与破折号",
     "S2": "翻案腔",
-    "S3": "口头路标",
-    "S4": "黑话",
-    "S5": "排比",
-    "S6": "假深刻",
-    "S7": "名词化与翻译腔",
-    "S8": "主干太晚",
-    "S9": "节奏",
-    "S10": "比喻换场",
-    "S11": "协作残留",
-    "F1": "无名权威与来源",
+    "S3": "排比",
+    "S4": "假深刻",
+    "S5": "名词化与翻译腔",
+    "S6": "主干太晚",
+    "S7": "节奏",
     "C1": "篇幅",
     "C2": "规避词",
 }
@@ -433,23 +224,6 @@ def prose_paragraphs(text: str) -> list[Paragraph]:
         sentences = max(1, len(re.findall(r"[。！？!?]", clean)))
         paragraphs.append(Paragraph(position, clean, count, sentences))
     return paragraphs
-
-
-def metaphor_cluster(text: str, distance: int = 800):
-    hits = []
-    for field, words in METAPHOR_FIELDS.items():
-        for word in words:
-            for match in re.finditer(re.escape(word), text):
-                hits.append((match.start(), field, word))
-    hits.sort()
-    for index, (start, _, _) in enumerate(hits):
-        window = [hit for hit in hits[index:] if hit[0] - start <= distance]
-        fields = {hit[1] for hit in window}
-        if len(fields) >= 3:
-            return window, fields
-    return None
-
-
 def short_streak(paragraphs: list[Paragraph], limit: int = 4):
     streak = []
     for paragraph in paragraphs:
@@ -460,44 +234,139 @@ def short_streak(paragraphs: list[Paragraph], limit: int = 4):
         else:
             streak = []
     return None
-
-
-def opener_counts(paragraphs: list[Paragraph]):
-    counts = collections.Counter()
-    examples = {}
-    for paragraph in paragraphs:
-        value = paragraph.text.lstrip("“‘\"（(")
-        for opener in REPEATED_OPENERS:
-            if value.startswith(opener):
-                counts[opener] += 1
-                examples.setdefault(opener, paragraph.position)
-                break
-    return counts, examples
-
-
 def read_text(path: str) -> str:
     if path == "-":
         return sys.stdin.read()
     return Path(path).read_text(encoding="utf-8")
 
 
+def visible_char_count(text: str) -> int:
+    return len(re.sub(r"\s+", "", text))
+
+
+# 文末“参考来源”区不是正文，不计入 length。标题行可带 # 前缀，也可以是纯文字行。
+SOURCE_BLOCK = re.compile(r"(?m)^[ \t]*(?:#{1,6}[ \t]*)?参考来源[ \t]*$")
+
+
+def strip_source_block(text: str) -> str:
+    match = SOURCE_BLOCK.search(text)
+    return text[: match.start()] if match else text
+
+
+def paragraph_number(text: str, offset: int) -> int:
+    before = text[:offset]
+    paragraphs = [p for p in re.split(r"\n\s*\n", before) if p.strip()]
+    return max(1, len(paragraphs))
+
+
+def excerpt_at(text: str, start: int, end: int, radius: int = 18) -> str:
+    left = max(0, start - radius)
+    right = min(len(text), end + radius)
+    return re.sub(r"\s+", " ", text[left:right]).strip()
+
+
+def find_avoid_word_hits(text: str, words: List[str]) -> List[Dict[str, Any]]:
+    hits: List[Dict[str, Any]] = []
+    for word in words:
+        start = 0
+        while True:
+            index = text.find(word, start)
+            if index == -1:
+                break
+            end = index + len(word)
+            hits.append(
+                {
+                    "word": word,
+                    "paragraph": paragraph_number(text, index),
+                    "offset": index,
+                    "excerpt": excerpt_at(text, index, end),
+                }
+            )
+            start = end
+    return sorted(hits, key=lambda item: (item["offset"], item["word"]))
+
+
+def build_report(article: str, constraints: Dict[str, Any]) -> Dict[str, Any]:
+    from resolve_preferences import resolve_length_range
+
+    length_range = resolve_length_range(constraints["length"])
+    body = strip_source_block(article)
+    char_count = visible_char_count(body)
+    source_block_chars = visible_char_count(article) - char_count
+    issues: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+
+    length_result: Dict[str, Any] = {
+        "configured_length": constraints["length"],
+        "visible_char_count": char_count,
+        "source_block_chars": source_block_chars,
+        "status": "skipped" if length_range is None else "pass",
+    }
+    if length_range is not None:
+        lower, upper, label = length_range
+        length_result.update({"target": label, "min": lower, "max": upper})
+        if char_count > upper:
+            length_result["status"] = "fail"
+            issues.append(
+                {
+                    "type": "length",
+                    "severity": "hard",
+                    "message": f"字数 {char_count} 超过目标上限 {upper}（目标 {lower}-{upper}）",
+                }
+            )
+        elif char_count < lower:
+            # 低于下限只提醒：材料撑不住时宁可短，不为凑字数注水
+            length_result["status"] = "under"
+            warnings.append(
+                {
+                    "type": "length",
+                    "severity": "soft",
+                    "message": f"字数 {char_count} 低于目标下限 {lower}（目标 {lower}-{upper}）。材料不够时保持短稿，交稿时说明实际字数",
+                }
+            )
+
+    hits = find_avoid_word_hits(article, constraints["avoid_words"])
+    avoid_result = {
+        "checked_words": constraints["avoid_words"],
+        "hit_count": len(hits),
+        "hits": hits,
+        "status": "pass" if not hits else "fail",
+    }
+    for hit in hits:
+        issues.append(
+            {
+                "type": "avoid_word",
+                "severity": "hard",
+                "message": f"规避词“{hit['word']}”，第 {hit['paragraph']} 段，“{hit['excerpt']}”",
+                "word": hit["word"],
+                "paragraph": hit["paragraph"],
+                "excerpt": hit["excerpt"],
+            }
+        )
+
+    return {
+        "pass": not issues,
+        "issues": issues,
+        "warnings": warnings,
+        "length": length_result,
+        "avoid_words": avoid_result,
+        "style_source": constraints["style_source"],
+        "active_profile": constraints["effective_config"].get("_active_profile"),
+    }
+
+
 def check_constraints(text: str, args: argparse.Namespace):
     """按账号配置检查篇幅与规避词。未传配置参数时返回 None。"""
-    requested = (
-        args.profile or args.extend or args.length or args.writing_style or args.avoid_word
-    )
+    requested = args.profile or args.extend or args.length
     if not requested:
         return None
-    from media_config import ConfigError, build_report, resolve_constraints
+    from resolve_preferences import ConfigError, resolve_constraints
 
     try:
         constraints = resolve_constraints(
-            skill_root=args.skill_root,
             extend_path=args.extend,
             profile=args.profile,
             explicit_length=args.length,
-            explicit_style=args.writing_style,
-            extra_avoid_words=args.avoid_word,
         )
     except (OSError, ConfigError) as error:
         raise ValueError(f"配置解析失败。{error}") from error
@@ -516,10 +385,6 @@ def main() -> int:
     config_group.add_argument("--extend", help="EXTEND.md 路径，通常取 resolver 返回的 constraint_check_args")
     config_group.add_argument("--profile", help="账号名")
     config_group.add_argument("--length", help="本次覆盖的目标长度")
-    config_group.add_argument("--writing-style", help="本次覆盖的风格预设名")
-    config_group.add_argument(
-        "--avoid-word", action="append", default=[], help="本次追加的规避词，可重复"
-    )
     config_group.add_argument(
         "--skill-root",
         default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -591,48 +456,6 @@ def main() -> int:
             f"引出原话的冒号 {len(quote_colons)} 处，第 {lines} 行。确认引号里确实是原话，且不是提示性用法。"
         )
 
-    stop_matches = non_overlapping_terms(prose, HARD_STOPS)
-    for position, phrase in stop_matches:
-        fail("S3", f"硬停词，第 {line_number(text, position)} 行，{phrase}")
-
-    jargon_matches = non_overlapping_terms(prose, HARD_JARGON)
-    for position, phrase in jargon_matches:
-        fail("S4", f"黑话，第 {line_number(text, position)} 行，{phrase}")
-
-    context_jargon_matches = non_overlapping_terms(prose, CONTEXT_JARGON)
-    hard_spans = [
-        (position, position + len(phrase)) for position, phrase in jargon_matches
-    ]
-    context_jargon_matches = [
-        (position, phrase)
-        for position, phrase in context_jargon_matches
-        if not any(
-            position < end and position + len(phrase) > start
-            for start, end in hard_spans
-        )
-    ]
-    if context_jargon_matches:
-        samples = "、".join(
-            dict.fromkeys(phrase for _, phrase in context_jargon_matches)
-        )
-        lines = "、".join(
-            dict.fromkeys(
-                str(line_number(text, position))
-                for position, _ in context_jargon_matches[:8]
-            )
-        )
-        warn("S4",
-            f"有 {len(context_jargon_matches)} 处词语需要结合语境判断。"
-            f"第 {lines} 行出现 {samples}。本义准确时保留，用来抬价时改写。"
-        )
-
-    road_signs = all_matches(prose, ROAD_SIGN_PATTERNS)
-    for match in road_signs:
-        fail("S3",
-            f"模型路标，第 {line_number(text, match.start())} 行，"
-            f"“{excerpt(match.group().lstrip(ROAD_STRIP_CHARS))}”"
-        )
-
     pivots = all_matches(prose, PIVOT_PATTERNS)
     for match in pivots:
         fail("S2",
@@ -658,61 +481,31 @@ def main() -> int:
 
     anaphoras = anaphora_runs(prose)
     for match in anaphoras[:4]:
-        warn("S5",
+        warn("S3",
             f"三连以上同构排比，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group(), 44)}”。留两项，第三项换说法或删掉。"
         )
 
-    lyric_matches = non_overlapping_terms(prose, LYRIC_WORDS)
-    if len(lyric_matches) >= 2:
-        samples = "、".join(dict.fromkeys(term for _, term in lyric_matches))
-        warn("S6",
-            f"模型偏爱的抒情词 {len(lyric_matches)} 处。{samples}。"
-            "写具体事物时保留，给抽象概念穿衣服时删掉。"
-        )
-
     nominalizations = all_matches(prose, NOMINALIZATION_PATTERNS)
     for match in nominalizations[:4]:
-        warn("S7",
+        warn("S5",
             f"名词化句式，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group(), 36)}”。还原成直接的动词。"
-        )
-
-    conjunction_hits = non_overlapping_terms(prose, CONJUNCTIONS)
-    if total_han >= 600 and len(conjunction_hits) * 1000 / total_han > 7:
-        samples = "、".join(
-            f"{term} {count} 次"
-            for term, count in collections.Counter(
-                term for _, term in conjunction_hits
-            ).most_common(4)
-        )
-        warn("S9",
-            f"连词密度偏高，每千字 {len(conjunction_hits) * 1000 // total_han} 个。{samples}。"
-            "中文小句靠语序和事理相接，删掉一半试试。"
         )
 
     highlights = bracket_highlights(prose)
     highlight_limit = max(3, total_han // 700)
     if len(highlights) > highlight_limit:
         samples = "、".join(dict.fromkeys(match.group() for match in highlights[:6]))
-        warn("S6",
+        warn("S4",
             f"「」括起的短语共 {len(highlights)} 处。{samples}。太密说明在批量造金句。"
         )
 
     cv_result = sentence_length_cv(prose)
     if cv_result and cv_result[0] < 0.42:
-        warn("S9",
+        warn("S7",
             f"全文 {cv_result[1]} 个句子长度过于接近（变异系数 {cv_result[0]:.2f}）。"
             "人写的段落里十个字的句子会挨着四十个字的句子，放开几句，压短几句。"
-        )
-
-    marker_matches = non_overlapping_terms(prose, SOFT_MARKERS)
-    marker_limit = max(2, total_han // 900)
-    if len(marker_matches) > marker_limit:
-        samples = "、".join(dict.fromkeys(term for _, term in marker_matches))
-        warn("S3",
-            f"洞察路标共 {len(marker_matches)} 处，当前提醒线为 {marker_limit} 处。"
-            f"重点检查 {samples}。"
         )
 
     left_branches = all_matches(prose, LEFT_BRANCH_PATTERNS)
@@ -722,7 +515,7 @@ def main() -> int:
             f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 44)}”"
             for match in left_branches[:4]
         )
-        warn("S8",
+        warn("S6",
             f"长前置成分共 {len(left_branches)} 处，可能让主干来得太晚。{samples}"
         )
 
@@ -733,7 +526,7 @@ def main() -> int:
             f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 44)}”"
             for match in dense_de[:4]
         )
-        warn("S8",
+        warn("S6",
             f"有 {len(dense_de)} 个长句包含四个以上的“的”，可能要先交代人和动作。{samples}"
         )
 
@@ -742,92 +535,19 @@ def main() -> int:
         one_sentence = sum(paragraph.sentences <= 1 for paragraph in paragraphs)
         ratio = one_sentence / len(paragraphs)
         if ratio >= 0.75:
-            warn("S9",
+            warn("S7",
                 f"可识别段落中有 {ratio:.0%} 只有一句话，可能形成统一的短段鼓点。"
             )
 
     streak = short_streak(paragraphs)
     if streak:
         first = streak[0]
-        warn("S9",
+        warn("S7",
             f"从第 {line_number(text, first.position)} 行起连续出现 {len(streak)} 个短促单句段，"
             "检查是否在排队喊结论。"
         )
 
-    counts, opener_examples = opener_counts(paragraphs)
-    repeated = [(opener, count) for opener, count in counts.items() if count >= 4]
-    if repeated:
-        details = "、".join(f"{opener} {count} 次" for opener, count in repeated)
-        first_position = min(opener_examples[opener] for opener, _ in repeated)
-        warn("S9",
-            f"段落开场重复，从第 {line_number(text, first_position)} 行附近开始。{details}。"
-        )
 
-    metaphors = metaphor_cluster(prose)
-    if metaphors:
-        window, fields = metaphors
-        samples = "、".join(dict.fromkeys(hit[2] for hit in window))
-        warn("S10",
-            f"八百字内出现 {len(fields)} 套借喻。{'、'.join(sorted(fields))}。"
-            f"例词有 {samples}。"
-        )
-
-    authority_matches = all_matches(prose, ANONYMOUS_AUTHORITY_PATTERNS)
-    for match in authority_matches[:4]:
-        warn("F1",
-            f"无名权威，第 {line_number(text, match.start())} 行，“{match.group()}”。"
-            "后面有具名的人、机构、报告或日期就保留，没有来源就删去这层说法并降低断言强度。"
-        )
-
-    hype_matches = non_overlapping_terms(prose, HYPE_TERMS)
-    for position, term in hype_matches[:4]:
-        warn("S6",
-            f"意义拔高，第 {line_number(text, position)} 行，{term}。"
-            "写清变化和受影响的人，写不出来就删。"
-        )
-
-    translationese = all_matches(prose, TRANSLATIONESE_PATTERNS)
-    if len(translationese) >= 2:
-        samples = "；".join(
-            f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 24)}”"
-            for match in translationese[:4]
-        )
-        warn("S7",
-            f"翻译腔骨架共 {len(translationese)} 处。{samples}。找出谁做了什么，按人和动作重写。"
-        )
-
-    adverb_matches = non_overlapping_terms(prose, EMPTY_ADVERBS)
-    adverb_limit = max(2, total_han // 1000)
-    if len(adverb_matches) >= adverb_limit:
-        samples = "、".join(dict.fromkeys(term for _, term in adverb_matches))
-        warn("S7",
-            f"空洞副词共 {len(adverb_matches)} 处。{samples}。删掉以后意思不变就删。"
-        )
-
-    list_openers = []
-    for paragraph in prose_paragraphs(prose):
-        value = paragraph.text.lstrip("“‘\"（(")
-        for opener in LIST_OPENERS:
-            if value.startswith(opener):
-                list_openers.append((paragraph.position, opener))
-                break
-    if len(list_openers) >= 3:
-        details = "、".join(
-            f"{opener} {count} 次"
-            for opener, count in collections.Counter(
-                opener for _, opener in list_openers
-            ).items()
-        )
-        warn("S9",
-            f"清单式段落开头 {len(list_openers)} 处，从第 {line_number(text, list_openers[0][0])} 行附近开始。"
-            f"{details}。教程按步骤走时保留，其余让事理自己接上。"
-        )
-
-    residue_matches = non_overlapping_terms(prose, ASSISTANT_RESIDUE)
-    for position, term in residue_matches[:4]:
-        warn("S11",
-            f"聊天协作残留或引流号召，第 {line_number(text, position)} 行，{term}。删掉，或说清具体理由。"
-        )
 
     if constraint_report is not None:
         for issue in constraint_report["issues"]:
@@ -838,13 +558,7 @@ def main() -> int:
     summary = (
         f"翻案句 {len(pivots)}，翻案腔变形 {len(semantic_pivots)}，"
         f"同构排比 {len(anaphoras)}，名词化 {len(nominalizations)}，"
-        f"黑话 {len(jargon_matches)}，硬停词 {len(stop_matches)}，"
-        f"模型路标 {len(road_signs)}，需辨语境词 {len(context_jargon_matches)}，"
-        f"抒情词 {len(lyric_matches)}，洞察路标 {len(marker_matches)}，"
-        f"长前置成分 {len(left_branches)}，重定语句 {len(dense_de)}，"
-        f"无名权威 {len(authority_matches)}，意义拔高 {len(hype_matches)}，"
-        f"翻译腔骨架 {len(translationese)}，空洞副词 {len(adverb_matches)}，"
-        f"清单式开头 {len(list_openers)}，协作残留 {len(residue_matches)}"
+        f"长前置成分 {len(left_branches)}，重定语句 {len(dense_de)}"
     )
 
     if args.json:

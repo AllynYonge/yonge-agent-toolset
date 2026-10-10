@@ -23,7 +23,6 @@ wechat-tech:
   positioning: "泛技术人群的认知升级"
   audience: "25-40岁互联网从业者，关注效率与思维方式"
   purpose: "建立个人品牌，沉淀方法论内容资产"
-  writing_style: lucid-tech
   length: long
   long_threshold: 5000
   avoid_words:
@@ -36,7 +35,6 @@ xhs-lifestyle:
   positioning: "生活方式分享与好物种草"
   audience: "20-35岁女性，追求品质生活"
   purpose: "变现（带货/广告合作）"
-  writing_style: life-observer
   length: short
   long_threshold: 2000
   avoid_words:
@@ -48,7 +46,6 @@ wechat-personal:
   positioning: "个人思考与生活记录"
   audience: "熟人圈层，朋友和同事"
   purpose: "记录生活，保持表达习惯"
-  writing_style: warm-narrative
   length: "1000-1500"
   custom_style:                   # 完整字段结构见下方 §custom_style
     name: 个人随笔
@@ -73,7 +70,7 @@ wechat-personal:
 | `default_profile` | 字符串 | （无） | 默认激活的账号名 |
 | `long_threshold` | 数字 | 3000 | 长内容流的字符数阈值 |
 | `output_dir` | 字符串 | （无） | 创建/改写完成后保存 Markdown 文章的目录 |
-| `avoid_words` | 列表 | （无） | 全局规避词（与风格文件中的 words_to_avoid 合并取并集） |
+| `avoid_words` | 列表 | （无） | 全局规避词（与 custom_style 中的 words_to_avoid 合并取并集） |
 | `compliance_guardrails` | 字符串列表 | `[]` | 全局合规红线；解析顺序与格式见下方同名小节 |
 
 ### 账号属性
@@ -87,13 +84,12 @@ wechat-personal:
 | `positioning` | 字符串 | （无） | 账号定位——一句话描述账号的内容方向和差异化角度 |
 | `audience` | 字符串 | （无） | 目标受众画像——描述核心读者群体特征 |
 | `purpose` | 字符串 | （无） | 做账号的最终目的——变现方式、品牌目标或个人动机 |
-| `writing_style` | 字符串 | （无） | 内置预设名；未设置时按 SKILL.md 默认写法 |
 | `deep` | 字符串 | `low` | 改写深度：`low`、`medium` 或 `high` |
-| `custom_style` | 对象 | （无） | 内联自定义写作风格（字段结构同 styles/*.md 的 frontmatter），优先级高于 `writing_style` |
+| `custom_style` | 对象 | （无） | 内联自定义写作风格，字段结构见下方 §custom_style；未设置时按 SKILL.md 默认写法 |
 | `length` | 数字/字符串 | `auto` | 输出文章目标字数。数字、范围字符串（`"800-1200"`）或预设（`short`/`medium`/`long`/`auto`） |
 | `long_threshold` | 数字 | 3000 | 长内容流的字符数阈值 |
 | `output_dir` | 字符串 | （无） | 创建/改写完成后保存 Markdown 文章的目录；账号内配置可覆盖全局配置 |
-| `avoid_words` | 列表 | （无） | 该账号的规避词列表（替换而非合并全局列表） |
+| `avoid_words` | 列表 | （无） | 该账号的规避词列表（与全局列表取并集） |
 | `compliance_guardrails` | 字符串列表 | 继承 | 账号合规红线，覆盖而非合并全局清单 |
 
 ## 字段详情
@@ -163,18 +159,6 @@ purpose: "记录生活，保持表达习惯"
 - 影响选题优先级——品牌目的偏向深度内容，获客目的偏向高传播性内容
 - 不会在文章中直接暴露目的——这是策略层信息，不是写作指令
 
-### writing_style
-
-指定写作风格来源。值为内置预设名，技能从 `references/publish/styles/{name}.md` 加载（脚本读 frontmatter 字段，正文是给代理读的风格说明）。
-
-```yaml
-writing_style: lucid-tech
-```
-
-可用预设：`lucid-tech`、`life-observer`、`sharp-commentary`、`warm-narrative`
-
-未设置时不套用任何预设，按 SKILL.md 的默认写法写。
-
 ### length
 
 控制输出文章的目标字数。仅作用于创建和改写模式，审核模式不受影响。
@@ -227,7 +211,7 @@ output_dir: /Users/me/articles
 
 ### custom_style
 
-内联自定义写作风格，字段结构与 `references/publish/styles/*.md` 的 frontmatter 相同（custom_style 是 EXTEND.md 里的 dict，只有 frontmatter 字段、没有正文——resolver 返回完整风格，并提取 `words_to_avoid` 和可选的 `compliance_guardrails`；后者由代理做语义审核）。设置后优先级高于 `writing_style` 风格预设名。这是自定义风格字段结构的权威模板——`references/publish/style.md` 只列字段名，需要照抄完整结构时读这里。
+内联自定义写作风格，是 EXTEND.md 里的 dict。resolver 返回完整风格，并提取 `words_to_avoid` 和可选的 `compliance_guardrails`；后者由代理做语义审核。技能没有内置风格预设，旧配置里的 `writing_style` 字段已取消，resolver 遇到会报错，请删除该字段。这是自定义风格字段结构的权威模板——`references/publish/style.md` 只列字段名，需要照抄完整结构时读这里。
 
 ```yaml
 custom_style:
@@ -261,12 +245,10 @@ custom_style:
 字段规则：
 
 - 所有值用自然语言描述——风格是连续谱，不是离散枚举
-- `words_to_avoid` 与全局 `avoid_words` 取并集生效
+- `words_to_avoid` 与全局、账号 `avoid_words` 取并集生效
 - `preferred_opening` 是偏好而非强制——内容需要时可选其他开头方式
 - `words_to_keep`、`favorite_moves` 里出现 SKILL.md「成稿绝对不能出现」覆盖的词和句式时，一律不执行
 - 不要在风格定义里混入平台约束（段落字数、emoji 策略）或媒介约束（叙事结构、开篇钩子）
-
-**优先级**：`custom_style` > `writing_style` 预设名。
 
 可在 `custom_style` 中放置 `compliance_guardrails` 作为回退清单；它不是声音参数，优先放在账号级。不要同时复制到 `stance`、`description` 等字段；具体行为见下一节。
 
@@ -282,7 +264,7 @@ wechat-living:
     - "引用书籍或研究时注明真实来源，不编造来源，也不把相关性写成因果关系。"
 ```
 
-**解析顺序**：账号级 `compliance_guardrails` > 全局同名字段 > 已选风格中的同名字段（`custom_style` 优先于预设）> `[]`。只取首个存在的字段，不跨层合并；结果由 resolver 的每个 profile 顶层 `compliance_guardrails` 返回，代理不再自行选择原始字段。
+**解析顺序**：账号级 `compliance_guardrails` > 全局同名字段 > `custom_style` 中的同名字段 > `[]`。只取首个存在的字段，不跨层合并；结果由 resolver 的每个 profile 顶层 `compliance_guardrails` 返回，代理不再自行选择原始字段。
 
 **格式与空值**：
 
@@ -300,13 +282,15 @@ wechat-living:
 
 ### avoid_words
 
-扩展风格文件中的 `words_to_avoid`。此处列出的词语在审核和重写时按硬约束修复。
+扩展 `custom_style` 中的 `words_to_avoid`。此处列出的词语在审核和重写时按硬约束修复。
 
-**合并规则**：最终的规避词列表 = 风格文件的 words_to_avoid ∪ EXTEND.md 的 avoid_words。
+**合并规则**：最终的规避词列表 = 全局 `avoid_words` ∪ 账号 `avoid_words` ∪ `custom_style` 的 `words_to_avoid`。
 
-创建和改写完成后，主代理运行 `scripts/check_prose.py {constraint_check_args}` 确定性扫描最终正文。规避词部分只检查 EXTEND.md、active 账号、custom_style 和风格预设中可逐字匹配的词；结构、句法和语气层面的 AI 痕迹由同一脚本的硬禁令与形状检查处理。
+账号写 `avoid_words: []` 表示本账号不额外增加规避词，全局词继续生效。
 
-账号规避词来自用户配置，不属于技能内置的硬禁词表，不受 `references/quality/revision.md`「检查脚本里的硬禁词必须与本节完全一致」的约束。命中 `avoid_words` 或 `custom_style.words_to_avoid` 时，先按硬约束修复；只有当修复会删减事实或改变立场时，才进入待确认清单。
+创建和改写完成后，主代理运行 `scripts/check_prose.py {constraint_check_args}` 确定性扫描最终正文。规避词部分只检查 EXTEND.md、active 账号和 custom_style 中可逐字匹配的词；结构、句法和语气层面的 AI 痕迹由同一脚本的硬禁令与形状检查处理。
+
+账号规避词来自用户配置，不属于技能内置的硬禁词表，不受 SKILL.md「成稿绝对不能出现」中“检查脚本不得自行增加未写明的硬禁词”的约束。命中 `avoid_words` 或 `custom_style.words_to_avoid` 时，先按硬约束修复；只有当修复会删减事实或改变立场时，才进入待确认清单。
 
 ### default_profile
 
@@ -320,5 +304,6 @@ wechat-living:
 
 **字段覆盖规则**：
 - 标量字段（字符串、数字、布尔）：账号值直接替换全局值
-- 列表字段（`avoid_words`、`compliance_guardrails`）：账号值完整替换全局列表，不做合并
+- `avoid_words`：全局与账号取并集，账号写 `[]` 也不清空全局词
+- 列表字段 `compliance_guardrails`：账号值完整替换全局列表，不做合并
 - 未在账号中出现的字段：回退到全局值，全局未定义则使用内置默认值

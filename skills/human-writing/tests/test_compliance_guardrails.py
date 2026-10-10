@@ -21,16 +21,19 @@ SKILL_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = SKILL_ROOT / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
 
-from media_config import (  # noqa: E402
-    ConfigError,
-    build_report,
-    parse_simple_yaml,
-    resolve_constraints,
-)
 from resolve_preferences import (  # noqa: E402
+    ConfigError,
+    LENGTH_PRESETS,
     build_profile_result,
     extract_accounts,
+    parse_simple_yaml,
     resolve_compliance_guardrails,
+    resolve_constraints,
+)
+from check_prose import (  # noqa: E402
+    build_report,
+    strip_source_block,
+    visible_char_count,
 )
 
 
@@ -97,25 +100,8 @@ class GuardrailResolutionTests(unittest.TestCase):
         data = {'demo': {'custom_style': {'compliance_guardrails': ['style']}}}
         self.assertEqual(self.profile(data, 'demo')['compliance_guardrails'], ['style'])
 
-    def test_selected_preset_supplies_fallback(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            styles = root / 'references' / 'publish' / 'styles'
-            styles.mkdir(parents=True)
-            (styles / 'demo.md').write_text('''---
-name: demo
-compliance_guardrails:
-  - "预设规则"
----
-''', encoding='utf-8')
-            result = build_profile_result(str(root), None, None,
-                                          {'writing_style': 'demo'}, str(root))
-            self.assertEqual(result['compliance_guardrails'], ['预设规则'])
-
-    def test_custom_style_does_not_mix_in_preset_rules(self):
-        # A custom style replaces the preset entirely, even with no extra rules.
-        result = self.profile({'custom_style': {'name': 'custom'},
-                               'writing_style': 'nonexistent-preset'})
+    def test_custom_style_without_rules_yields_empty_list(self):
+        result = self.profile({'custom_style': {'name': 'custom'}})
         self.assertEqual(result['style_source'], 'custom_style')
         self.assertEqual(result['compliance_guardrails'], [])
 
@@ -242,7 +228,7 @@ demo:
     - "不得承诺投资收益。"
 ---
 ''', encoding='utf-8')
-            constraints = resolve_constraints(str(SKILL_ROOT), str(path), 'demo', None, None, [])
+            constraints = resolve_constraints(str(path), 'demo', None)
             # Semantic violation with no literal avoid-word hit: script alone must not be
             # mistaken for a compliance verdict. A reviewer still has to apply the rules.
             report = build_report('这项投资保证本金翻倍。', constraints)
@@ -290,7 +276,6 @@ class MergedCheckerTests(unittest.TestCase):
             return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
     def test_short_preset_matches_schema(self):
-        from media_config import LENGTH_PRESETS
         self.assertEqual(LENGTH_PRESETS['short'], (300, 500))
 
     def test_over_upper_fails_under_lower_warns(self):
@@ -305,11 +290,9 @@ class MergedCheckerTests(unittest.TestCase):
         self.assertEqual(under['warnings'][0]['type'], 'length')
 
     def test_length_counts_all_non_whitespace(self):
-        from media_config import visible_char_count
         self.assertEqual(visible_char_count('ab 中文\n，。'), 6)
 
     def test_source_block_is_excluded_from_length(self):
-        from media_config import strip_source_block, visible_char_count
         constraints = {'length': '5-8', 'avoid_words': [], 'style_source': 'x',
                        'effective_config': {}}
         body = '一二三四五六\n'
@@ -340,10 +323,13 @@ class MergedCheckerTests(unittest.TestCase):
         result = self.run_checker('他把表格改了一遍，第二天交给了组长。\n', '--length', '5')
         self.assertEqual(result.returncode, 1)
         self.assertIn('超过目标上限', result.stdout)
-        result = self.run_checker('他把表格改了一遍。\n', '--avoid-word', '表格', '--json')
-        data = json.loads(result.stdout)
-        self.assertFalse(data['pass'])
-        self.assertEqual(data['constraints']['avoid_words']['hit_count'], 1)
+        with tempfile.TemporaryDirectory() as folder:
+            extend = Path(folder) / 'EXTEND.md'
+            extend.write_text('---\navoid_words: [表格]\n---\n', encoding='utf-8')
+            result = self.run_checker('他把表格改了一遍。\n', '--extend', str(extend), '--json')
+            data = json.loads(result.stdout)
+            self.assertFalse(data['pass'])
+            self.assertEqual(data['constraints']['avoid_words']['hit_count'], 1)
 
     def test_platform_labels_only_release_label_colons(self):
         text = '📍地址：上海徐汇\n- ⏰营业：十点开门\n提示：这里不行\n'
@@ -352,16 +338,6 @@ class MergedCheckerTests(unittest.TestCase):
         labelled = self.run_checker(text, '--platform-labels')
         self.assertIn('中文冒号共 1 处', labelled.stdout)
         self.assertEqual(labelled.returncode, 1)
-
-    def test_style_presets_do_not_keep_hard_stops(self):
-        from check_prose import HARD_STOPS, HARD_JARGON
-        styles = SKILL_ROOT / 'references' / 'publish' / 'styles'
-        for path in styles.glob('*.md'):
-            with self.subTest(style=path.name):
-                text = path.read_text(encoding='utf-8')
-                for term in HARD_STOPS + HARD_JARGON:
-                    keep = text.split('words_to_avoid', 1)[0]
-                    self.assertNotIn(term, keep)
 
 
 class FlowTests(unittest.TestCase):
@@ -409,15 +385,28 @@ class UnifiedFlowTests(unittest.TestCase):
         self.assertIsNone(result['style_source'])
         self.assertEqual(result['style'], {})
         self.assertEqual(result['avoid_words'], [])
-        constraints = resolve_constraints(str(SKILL_ROOT), None, None, None, None, [])
+        constraints = resolve_constraints(None, None, None)
         self.assertIsNone(constraints['style_source'])
         self.assertEqual(constraints['avoid_words'], [])
 
-    def test_preset_is_opt_in(self):
-        result = build_profile_result(str(SKILL_ROOT), None, None,
-                                      {'writing_style': 'warm-narrative'}, str(SKILL_ROOT))
-        self.assertTrue(result['style_source'].endswith('warm-narrative.md'))
-        self.assertIn('治愈', result['avoid_words'])
+    def test_removed_writing_style_is_rejected(self):
+        # 内置预设已取消：遗留的 writing_style 必须报错，不能被静默忽略。
+        with self.assertRaises(ConfigError):
+            build_profile_result(str(SKILL_ROOT), None, None,
+                                 {'writing_style': 'warm-narrative'}, str(SKILL_ROOT))
+        with self.assertRaises(ConfigError):
+            build_profile_result(str(SKILL_ROOT), None, 'demo',
+                                 {'demo': {'writing_style': 'warm-narrative',
+                                           'custom_style': {'name': 'x'}}},
+                                 str(SKILL_ROOT))
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'EXTEND.md'
+            path.write_text('---\ndemo:\n  writing_style: lucid-tech\n---\n', encoding='utf-8')
+            with self.assertRaises(ConfigError):
+                resolve_constraints(str(path), 'demo', None)
+
+    def test_styles_directory_is_gone(self):
+        self.assertFalse((SKILL_ROOT / 'references' / 'publish' / 'styles').exists())
 
     def test_no_route_concept_left(self):
         paths = [SKILL_ROOT / 'SKILL.md', *SKILL_ROOT.glob('references/**/*.md'),
@@ -480,10 +469,13 @@ class RuleCodeTests(unittest.TestCase):
                 self.assertIn(f'### {code} {name}\n', text)
 
     def test_issues_carry_codes(self):
-        data = self.run_json('他说白了就是想赋能。\n真正决定我留下来的不是速度，而是搜索。\n',
-                             '--avoid-word', '搜索')
+        with tempfile.TemporaryDirectory() as folder:
+            extend = Path(folder) / 'EXTEND.md'
+            extend.write_text('---\navoid_words: [搜索]\n---\n', encoding='utf-8')
+            data = self.run_json('他说白了就是想赋能。\n真正决定我留下来的不是速度，而是搜索。\n',
+                                 '--extend', str(extend))
         codes = {issue['code'] for issue in data['issues'] if issue['level'] == 'fail'}
-        self.assertTrue({'S2', 'S3', 'S4', 'C2'} <= codes)
+        self.assertTrue({'S2', 'C2'} <= codes)
         self.assertTrue(all(item.startswith('[') for item in data['failures']))
         self.assertEqual(len(data['failures']) + len(data['warnings']), len(data['issues']))
 
