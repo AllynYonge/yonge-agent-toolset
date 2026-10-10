@@ -256,7 +256,7 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn('#### 合规红线检查', prompt)
         self.assertIn('原文位置与引用 / 核实缺口', prompt)
         self.assertIn('违反和待核实均阻止 PASS', prompt)
-        self.assertIn('输入或依赖缺失时使用 ERROR', prompt)
+        self.assertIn('输入或依赖缺失、脚本执行失败时使用 ERROR', prompt)
         self.assertIn('不得标记为可发布', text)
 
     def test_skill_explains_semantic_check_and_conflict_handling(self):
@@ -330,14 +330,6 @@ class MergedCheckerTests(unittest.TestCase):
             data = json.loads(result.stdout)
             self.assertFalse(data['pass'])
             self.assertEqual(data['constraints']['avoid_words']['hit_count'], 1)
-
-    def test_platform_labels_only_release_label_colons(self):
-        text = '📍地址：上海徐汇\n- ⏰营业：十点开门\n提示：这里不行\n'
-        plain = self.run_checker(text)
-        self.assertIn('中文冒号共 3 处', plain.stdout)
-        labelled = self.run_checker(text, '--platform-labels')
-        self.assertIn('中文冒号共 1 处', labelled.stdout)
-        self.assertEqual(labelled.returncode, 1)
 
 
 class FlowTests(unittest.TestCase):
@@ -422,7 +414,7 @@ class UnifiedFlowTests(unittest.TestCase):
 
     def test_single_workflow_lives_in_skill(self):
         text = (SKILL_ROOT / 'SKILL.md').read_text(encoding='utf-8')
-        self.assertIn('### 九步流程', text)
+        self.assertIn('### 七步流程', text)
         self.assertIn('references/tasks/rewrite.md', text)
         self.assertNotIn('workflows/', text)
         self.assertFalse((SKILL_ROOT / 'references' / 'publish' / 'workflows').exists())
@@ -499,7 +491,7 @@ class SingleSourceTests(unittest.TestCase):
 
     def test_skill_routes_reading_by_two_questions(self):
         text = (SKILL_ROOT / 'SKILL.md').read_text(encoding='utf-8')
-        self.assertIn('### 起草时读哪些文件', text)
+        self.assertIn('起草时读哪些文件', text)
         self.assertNotIn('craft/voice.md', text)
         self.assertFalse((SKILL_ROOT / 'references' / 'craft' / 'voice.md').exists())
 

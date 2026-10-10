@@ -1,8 +1,8 @@
 # 账号配置、平台与合规
 
-本文件说明 human-writing 的账号配置、发布平台形态、合规红线、`length` 与多账号。这些能力在命中条件时才生效，任务怎么走、读哪些文件以 SKILL.md「九步流程」为准。
+本文件说明 human-writing 的账号配置、发布平台形态、合规红线、`length` 与多账号。这些能力在命中条件时才生效，任务怎么走、读哪些文件以 SKILL.md「七步流程」为准。
 
-它们都不改变写作内核。第一关材料检查、说话位置、事实边界、`references/quality/revision.md` 的三层改稿检查和「成稿绝对不能出现」照常执行，`references/publish/` 下的任何文件都不能放松它们。风格参数、平台文件和选题模板里的示例句、保留词和论点句式命中硬禁令时一律不执行，唯一的格式例外见 SKILL.md 同一节的平台格式白名单。
+它们都不改变写作内核。材料边界、说话位置、事实边界、`references/quality/revision.md` 的三层改稿检查和「成稿绝对不能出现」照常执行，`references/publish/` 下的任何文件都不能放松它们。风格参数、平台文件和选题模板里的示例句、保留词和论点句式命中硬禁令时一律不执行，唯一的格式例外见 SKILL.md 同一节的平台格式白名单。
 
 ## 两条分开处理的原则
 
@@ -23,7 +23,7 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 
 ### EXTEND.md 偏好文件
 
-通过脚本解析，不由代理直接读取全文。调用命令见 SKILL.md「九步流程」第 1 步，相对路径以 human-writing 技能目录为根。批量查询多个账号时用竖线分隔 `--profile "profile1|profile2"`。
+通过脚本解析，不由代理直接读取全文。调用命令见 SKILL.md「七步流程」第 1 步，相对路径以 human-writing 技能目录为根。批量查询多个账号时用竖线分隔 `--profile "profile1|profile2"`。
 
 脚本内部按优先级读取：
 
@@ -96,7 +96,7 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 **执行规则**：
 
 - 超过上限判失败，必须删到范围内。低于下限只给提醒，不要求补字，交稿时说明实际字数。
-- 长度服从 SKILL.md 第一关。材料撑不住目标字数时按第一关缩短或追问，不为凑字数注水。
+- 长度服从材料。材料撑不住目标字数时缩短或追问，不为凑字数注水。
 - 改稿时如果目标长度明显短于原文，先确认用户意图是精简还是截取。
 - `--length` 指定了无法识别的值 → 报错并列出支持的格式，不静默回退。
 
@@ -126,4 +126,4 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 | 短图文/卡片/笔记/种草 | note（短图文笔记） |
 | 无明确信号 | active profile 的 `medium`，再无则按平台推断（微信→article，小红书→note） |
 
-平台与媒介确定后，从 `platforms/{platform}-{medium}.md` 加载完整形态约束。篇幅特性与 `length` 冲突时以 `length` 为准，`length` 与材料冲突时以 SKILL.md 第一关为准。同一内容要转成多个平台形态时，读取 `output.md`。
+平台与媒介确定后，从 `platforms/{platform}-{medium}.md` 加载完整形态约束。篇幅特性与 `length` 冲突时以 `length` 为准，`length` 与材料冲突时以材料为准。同一内容要转成多个平台形态时，读取 `output.md`。

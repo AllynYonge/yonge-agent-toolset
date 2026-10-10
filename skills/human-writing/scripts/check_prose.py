@@ -19,20 +19,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
-# 平台信息标签：行首 emoji 或符号，加不超过六个字的标签，紧跟冒号，如“📍地址：”。
-# 只在 --platform-labels 打开时放行，规则见 SKILL.md「成稿绝对不能出现」的平台格式例外。
-PLATFORM_LABEL_PATTERN = re.compile(
-    r"^[ \t]*(?:[-*+]\s+)?[^\w\s，。！？、；：:（）《》“”‘’「」\[\]()#>`*+\-.]{1,3}\s*[\u4e00-\u9fffA-Za-z0-9]{1,6}[：:]",
-    re.MULTILINE,
-)
-
-FORBIDDEN_PUNCTUATION = {
-    "：": "中文冒号",
-    ":": "英文冒号",
-    "—": "破折号",
-    "–": "连接号式破折号",
-}
-
 PIVOT_PATTERNS = (
     re.compile(r"(?:并)?不是[^。！？\n]{0,90}而是"),
     re.compile(r"并非[^。！？\n]{0,90}而是"),
@@ -73,7 +59,6 @@ LEFT_BRANCH_PATTERNS = (
 
 # 每条结果的编号与 references/quality/revision.md 的小节一一对应，修改时按编号找修法。
 RULE_NAMES = {
-    "S1": "冒号与破折号",
     "S2": "翻案腔",
     "S3": "排比",
     "S4": "假深刻",
@@ -376,11 +361,6 @@ def check_constraints(text: str, args: argparse.Namespace):
 def main() -> int:
     parser = argparse.ArgumentParser(description="检查中文成稿的硬禁令与模型化形状")
     parser.add_argument("path", help="Markdown 或文本文件路径。使用 - 从标准输入读取")
-    parser.add_argument(
-        "--platform-labels",
-        action="store_true",
-        help="放行行首 emoji 加短标签的平台信息冒号，如“📍地址：”",
-    )
     config_group = parser.add_argument_group("账号配置的篇幅与规避词检查")
     config_group.add_argument("--extend", help="EXTEND.md 路径，通常取 resolver 返回的 constraint_check_args")
     config_group.add_argument("--profile", help="账号名")
@@ -405,11 +385,6 @@ def main() -> int:
         print(str(error), file=sys.stderr)
         return 2
 
-    label_spans = []
-    if args.platform_labels:
-        for match in PLATFORM_LABEL_PATTERN.finditer(text):
-            label_spans.append(match.end() - 1)
-
     prose = mask_non_prose(text)
     total_han = han_count(prose)
     if total_han == 0:
@@ -430,31 +405,6 @@ def main() -> int:
 
     def warn(code: str, message: str) -> None:
         record("warn", code, message)
-
-    quote_colons = []
-    for symbol, label in FORBIDDEN_PUNCTUATION.items():
-        matches = list(re.finditer(re.escape(symbol), prose))
-        if symbol in ("：", ":"):
-            hard = []
-            for match in matches:
-                if match.start() in label_spans:
-                    continue
-                tail = prose[match.end() : match.end() + 2].lstrip()
-                if tail[:1] in ("「", "『", "“", "‘", '"'):
-                    quote_colons.append(match)
-                else:
-                    hard.append(match)
-            matches = hard
-        if matches:
-            lines = "、".join(str(line_number(text, match.start())) for match in matches[:8])
-            fail("S1", f"{label}共 {len(matches)} 处，出现在第 {lines} 行。")
-    if quote_colons:
-        lines = "、".join(
-            str(line_number(text, match.start())) for match in quote_colons[:8]
-        )
-        warn("S1",
-            f"引出原话的冒号 {len(quote_colons)} 处，第 {lines} 行。确认引号里确实是原话，且不是提示性用法。"
-        )
 
     pivots = all_matches(prose, PIVOT_PATTERNS)
     for match in pivots:
