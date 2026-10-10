@@ -84,6 +84,8 @@ MCP configurations are merged by service name. Existing unrelated settings and M
 
 Both local and remote MCP entries accept an optional `startup_timeout_sec` positive integer. Codex writes it as `startup_timeout_sec` in seconds. Claude Code and the `agents` platform ignore it because neither target format has an equivalent per-server startup timeout field.
 
+Both local and remote MCP entries also accept an optional non-empty `description`. Only the `agents` platform writes it, because Pi's `.pi/mcp.json` is the only target format with an equivalent field; Codex and Claude Code have no such field, so it is dropped for them. The value is written exactly as configured.
+
 Remote MCP entries accept an optional `oauth` object with a required non-empty `clientId` string, used to pin a pre-registered OAuth client instead of letting the platform register one dynamically. `oauth` is rejected on local servers. Each platform receives its own field spelling:
 
 | Platform | Written form |

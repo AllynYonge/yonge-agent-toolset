@@ -22,6 +22,7 @@ export interface LocalMcpServerConfig {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  description?: string;
   startup_timeout_sec?: number;
 }
 
@@ -34,6 +35,7 @@ export interface RemoteMcpServerConfig {
   url: string;
   headers?: Record<string, string>;
   oauth?: McpOAuthConfig;
+  description?: string;
   startup_timeout_sec?: number;
 }
 

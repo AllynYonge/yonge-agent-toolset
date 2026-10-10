@@ -30,6 +30,11 @@
           // Codex 原样写入 startup_timeout_sec；
           // Claude Code 和 agents 平台忽略该字段。
           "startup_timeout_sec": 120,
+
+          // 可选。这个 MCP 服务提供什么，一句话说明，必须是非空字符串。
+          // 只有 agents 平台（Pi 的 .pi/mcp.json）会写入；Codex 和 Claude Code
+          // 的目标格式没有对应字段，会被丢弃。Pi 用它列出该服务并给工具搜索排序。
+          "description": "读写项目文件，支持按路径检索",
         },
 
         "context7": {

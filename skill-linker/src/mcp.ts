@@ -35,6 +35,14 @@ function validateStartupTimeout(raw: unknown): string | undefined {
   return undefined;
 }
 
+function validateDescription(raw: unknown): string | undefined {
+  if (typeof raw !== "string" || raw.trim().length === 0) {
+    return "description must be a non-empty string";
+  }
+
+  return undefined;
+}
+
 function validateOAuth(raw: unknown): McpOAuthConfig | string {
   if (!isRecord(raw)) {
     return "oauth must be an object";
@@ -84,11 +92,19 @@ function validateMcpServer(name: string, raw: unknown): McpServerConfig | string
       return startupTimeoutProblem;
     }
 
+    const descriptionProblem = raw.description === undefined
+      ? undefined
+      : validateDescription(raw.description);
+    if (descriptionProblem !== undefined) {
+      return descriptionProblem;
+    }
+
     return {
       type: "local",
       command: raw.command,
       ...(raw.args === undefined ? {} : { args: raw.args as string[] }),
       ...(raw.env === undefined ? {} : { env: raw.env as Record<string, string> }),
+      ...(raw.description === undefined ? {} : { description: raw.description as string }),
       ...(raw.startup_timeout_sec === undefined
         ? {}
         : { startup_timeout_sec: raw.startup_timeout_sec as number }),
@@ -119,11 +135,19 @@ function validateMcpServer(name: string, raw: unknown): McpServerConfig | string
       oauth = validatedOAuth;
     }
 
+    const descriptionProblem = raw.description === undefined
+      ? undefined
+      : validateDescription(raw.description);
+    if (descriptionProblem !== undefined) {
+      return descriptionProblem;
+    }
+
     return {
       type: "remote",
       url: raw.url,
       ...(raw.headers === undefined ? {} : { headers: raw.headers as Record<string, string> }),
       ...(oauth === undefined ? {} : { oauth }),
+      ...(raw.description === undefined ? {} : { description: raw.description as string }),
       ...(raw.startup_timeout_sec === undefined
         ? {}
         : { startup_timeout_sec: raw.startup_timeout_sec as number }),
@@ -151,13 +175,22 @@ function validateMcpServers(
   return { servers, warnings };
 }
 
-function toStandardMcpConfig(server: McpServerConfig): Record<string, unknown> {
+function toStandardMcpConfig(
+  server: McpServerConfig,
+  platform: Platform,
+): Record<string, unknown> {
+  // Pi reads `description` from its project MCP file; Claude Code has no such field.
+  const description = platform === "agents" && server.description !== undefined
+    ? { description: server.description }
+    : {};
+
   if (server.type === "local") {
     return {
       type: "stdio",
       command: server.command,
       ...(server.args === undefined ? {} : { args: server.args }),
       ...(server.env === undefined ? {} : { env: server.env }),
+      ...description,
     };
   }
 
@@ -166,6 +199,7 @@ function toStandardMcpConfig(server: McpServerConfig): Record<string, unknown> {
     url: server.url,
     ...(server.headers === undefined ? {} : { headers: server.headers }),
     ...(server.oauth === undefined ? {} : { oauth: { clientId: server.oauth.clientId } }),
+    ...description,
   };
 }
 
@@ -236,6 +270,7 @@ async function atomicWrite(destination: string, content: string): Promise<void> 
 async function writeStandardMcp(
   destination: string,
   servers: Record<string, McpServerConfig>,
+  platform: Platform,
 ): Promise<void> {
   const existingRaw = await readOptional(destination);
   const root = existingRaw === undefined ? {} : jsonObject(existingRaw, destination);
@@ -246,7 +281,7 @@ async function writeStandardMcp(
 
   const merged = existingServers ?? {};
   for (const [name, server] of Object.entries(servers)) {
-    merged[name] = toStandardMcpConfig(server);
+    merged[name] = toStandardMcpConfig(server, platform);
   }
   root.mcpServers = merged;
   await atomicWrite(destination, `${JSON.stringify(root, null, 2)}\n`);
@@ -320,7 +355,7 @@ async function writePlatform(
     await writeCodex(destination, servers);
   } else {
     // claude and agents both read the standard mcpServers shape.
-    await writeStandardMcp(destination, servers);
+    await writeStandardMcp(destination, servers, platform);
   }
 }
 

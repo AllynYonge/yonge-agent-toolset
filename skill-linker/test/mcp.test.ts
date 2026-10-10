@@ -221,6 +221,68 @@ describe("MCP configuration writing", () => {
     assert.equal("oauth" in claude.mcpServers.plain!, false);
   });
 
+  it("writes description only to the agents platform", async () => {
+    const root = await makeWorkspace();
+
+    const result = await writeMcpServers(
+      {
+        rea: {
+          type: "local",
+          command: "rea",
+          args: ["--mcp"],
+          description: "REA 逆向工程",
+        },
+        docs: {
+          type: "remote",
+          url: "https://example.com/mcp",
+          description: "Product documentation",
+        },
+        plain: { type: "remote", url: "https://example.com/plain" },
+      },
+      root,
+      ["codex", "claude", "agents"],
+    );
+
+    assert.deepEqual(result.warnings, []);
+
+    const codex = parseToml(await readFile(join(root, ".codex", "config.toml"), "utf8")) as {
+      mcp_servers: Record<string, Record<string, unknown>>;
+    };
+    assert.equal("description" in codex.mcp_servers.rea!, false);
+    assert.equal("description" in codex.mcp_servers.docs!, false);
+
+    const claude = JSON.parse(await readFile(join(root, ".mcp.json"), "utf8")) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    assert.equal("description" in claude.mcpServers.rea!, false);
+    assert.equal("description" in claude.mcpServers.docs!, false);
+
+    const agents = JSON.parse(await readFile(join(root, ".pi", "mcp.json"), "utf8")) as {
+      mcpServers: Record<string, Record<string, unknown>>;
+    };
+    assert.equal(agents.mcpServers.rea?.description, "REA 逆向工程");
+    assert.equal(agents.mcpServers.docs?.description, "Product documentation");
+    assert.equal("description" in agents.mcpServers.plain!, false);
+  });
+
+  it("rejects an empty or non-string description", async () => {
+    const root = await makeWorkspace();
+
+    const result = await writeMcpServers(
+      {
+        empty: { type: "local", command: "npx", description: "   " },
+        notAString: { type: "remote", url: "https://example.com", description: 3 },
+      },
+      root,
+      ["agents"],
+    );
+
+    assert.equal(result.written.length, 0);
+    assert.equal(result.warnings.length, 2);
+    assert.match(result.warnings[0] ?? "", /description must be a non-empty string/);
+    assert.match(result.warnings[1] ?? "", /description must be a non-empty string/);
+  });
+
   it("merges existing configs and preserves unrelated Codex text", async () => {
     const root = await makeWorkspace();
     await mkdir(join(root, ".codex"), { recursive: true });
