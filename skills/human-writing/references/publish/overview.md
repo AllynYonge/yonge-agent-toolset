@@ -2,7 +2,7 @@
 
 本文件说明 human-writing 的账号配置、发布平台形态、合规红线、`length` 与多账号。这些能力在命中条件时才生效，任务怎么走、读哪些文件以 SKILL.md「七步流程」为准。
 
-它们都不改变写作内核。材料边界、说话位置、事实边界、`references/quality/revision.md` 的三层改稿检查和「成稿绝对不能出现」照常执行，`references/publish/` 下的任何文件都不能放松它们。风格参数、平台文件和选题模板里的示例句、保留词和论点句式命中硬禁令时一律不执行，唯一的格式例外见 SKILL.md 同一节的平台格式白名单。
+它们都不改变写作内核。材料边界、说话位置、事实边界、`references/quality/` 下的审查维度和「成稿绝对不能出现」照常执行，`references/publish/` 下的任何文件都不能放松它们。风格参数、平台文件和选题模板里的示例句、保留词和论点句式命中硬禁令时一律不执行，唯一的格式例外见 SKILL.md 同一节的平台格式白名单。
 
 ## 两条分开处理的原则
 
@@ -112,9 +112,11 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 |--------|----------|
 | 公众号/WeChat/微信/长文/深度文章 | 微信 |
 | 小红书/xhs/RED/种草/笔记/分享帖 | 小红书 |
+| 知乎/知乎回答/问答 | 知乎 |
+| 论坛/长帖/连载帖/楼主 | 论坛 |
 | 无明确信号 | active profile 的 `platform`；再无则没有目标平台，不套用平台形态 |
 
-其他平台：继续但不应用平台特定规则，按 `references/craft/format.md` 处理。
+其他平台：继续但不应用平台特定规则，按 SKILL.md「不同形式怎样写」的对照表处理。
 
 ### 媒介检测
 
@@ -124,6 +126,6 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 |--------|----------|
 | 长文/深度/专栏文章 | article（长图文） |
 | 短图文/卡片/笔记/种草 | note（短图文笔记） |
-| 无明确信号 | active profile 的 `medium`，再无则按平台推断（微信→article，小红书→note） |
+| 无明确信号 | active profile 的 `medium`，再无则按平台推断（微信→article，小红书→note，知乎→answer，论坛→post） |
 
 平台与媒介确定后，从 `platforms/{platform}-{medium}.md` 加载完整形态约束。篇幅特性与 `length` 冲突时以 `length` 为准，`length` 与材料冲突时以材料为准。同一内容要转成多个平台形态时，读取 `output.md`。

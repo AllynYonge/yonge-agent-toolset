@@ -253,8 +253,11 @@ class WorkflowWiringTests(unittest.TestCase):
         text = self.text('agents/reviewer.md')
         prompt = text.split('```prompt\n', 1)[1].rsplit('```', 1)[0]
         self.assertIn('[COMPLIANCE_GUARDRAILS]', prompt)
-        self.assertIn('#### 合规红线检查', prompt)
-        self.assertIn('原文位置与引用 / 核实缺口', prompt)
+        # The compliance check itself now lives in the default review dimension file.
+        default_review = self.text('references/quality/revision.md')
+        self.assertIn('#### 合规红线检查', default_review)
+        self.assertIn('原文位置与引用 / 核实缺口', default_review)
+        self.assertIn('违反和待核实均阻止 PASS', default_review)
         self.assertIn('违反和待核实均阻止 PASS', prompt)
         self.assertIn('输入或依赖缺失、脚本执行失败时使用 ERROR', prompt)
         self.assertIn('不得标记为可发布', text)
@@ -443,7 +446,7 @@ class ReferenceIntegrityTests(unittest.TestCase):
 
 
 class RuleCodeTests(unittest.TestCase):
-    """Checker output points straight to the matching revision.md section."""
+    """Checker output points straight to the matching section in a review dimension file."""
 
     def run_json(self, text, *args):
         with tempfile.TemporaryDirectory() as folder:
@@ -453,27 +456,52 @@ class RuleCodeTests(unittest.TestCase):
             result = subprocess.run(cmd, capture_output=True, text=True, check=False)
             return json.loads(result.stdout)
 
-    def test_every_code_has_a_revision_section(self):
-        from check_prose import RULE_NAMES
-        text = (SKILL_ROOT / 'references' / 'quality' / 'revision.md').read_text(encoding='utf-8')
-        for code, name in RULE_NAMES.items():
-            with self.subTest(code=code):
-                self.assertIn(f'### {code} {name}\n', text)
+    def test_every_rule_has_a_section_in_its_file(self):
+        from check_prose import RULE_FILES
+        for name, relative in RULE_FILES.items():
+            with self.subTest(rule=name):
+                text = (SKILL_ROOT / relative).read_text(encoding='utf-8')
+                self.assertIn(f'### {name}\n', text)
 
-    def test_issues_carry_codes(self):
+    def test_dimension_files_have_no_rule_codes(self):
+        for path in (SKILL_ROOT / 'references' / 'quality').glob('*.md'):
+            with self.subTest(dimension=path.name):
+                self.assertIsNone(re.search(r'\b[ASCFGQM]\d{1,2}\b', path.read_text(encoding='utf-8')))
+
+    def test_reviewer_lists_every_dimension_file(self):
+        text = (SKILL_ROOT / 'agents' / 'reviewer.md').read_text(encoding='utf-8')
+        prompt = text.split('```prompt\n', 1)[1]
+        self.assertIn('[CHECK_DIMENSIONS]', prompt)
+        for path in (SKILL_ROOT / 'references' / 'quality').glob('*.md'):
+            body = path.read_text(encoding='utf-8')
+            with self.subTest(dimension=path.name):
+                self.assertIn(f'`references/quality/{path.name}`', text)
+                self.assertIn('## 不通过的条件', body)
+                self.assertIn('## 需要用户决定的问题', body)
+                self.assertIn('## 报告写法', body)
+
+    def test_issues_carry_rule_names(self):
         with tempfile.TemporaryDirectory() as folder:
             extend = Path(folder) / 'EXTEND.md'
             extend.write_text('---\navoid_words: [搜索]\n---\n', encoding='utf-8')
-            data = self.run_json('他说白了就是想赋能。\n真正决定我留下来的不是速度，而是搜索。\n',
+            data = self.run_json('他说白了就是想赋能。\n我留下来靠的是搜索。\n',
                                  '--extend', str(extend))
-        codes = {issue['code'] for issue in data['issues'] if issue['level'] == 'fail'}
-        self.assertTrue({'S2', 'C2'} <= codes)
+        names = {issue['name'] for issue in data['issues'] if issue['level'] == 'fail'}
+        self.assertIn('规避词', names)
+        self.assertTrue(all(issue['file'].startswith('references/quality/') for issue in data['issues']))
         self.assertTrue(all(item.startswith('[') for item in data['failures']))
         self.assertEqual(len(data['failures']) + len(data['warnings']), len(data['issues']))
 
 
+    def test_pivot_sentences_are_allowed(self):
+        from check_prose import RULE_FILES
+        self.assertNotIn('翻案句', RULE_FILES)
+        data = self.run_json('真正决定我留下来的不是速度，而是搜索。\n')
+        self.assertTrue(data['pass'])
+        self.assertNotIn('翻案句', {issue['name'] for issue in data['issues']})
+
 class SingleSourceTests(unittest.TestCase):
-    """A drafting example lives in one craft file; revision.md may reuse it only as a before/after pair."""
+    """A drafting example lives in one craft or genre file; revision.md may reuse it only as a before/after pair."""
 
     SAMPLES = (
         '天将明，人未归',
@@ -483,7 +511,10 @@ class SingleSourceTests(unittest.TestCase):
     )
 
     def test_samples_written_once_in_craft_and_skill(self):
-        paths = [SKILL_ROOT / 'SKILL.md', *SKILL_ROOT.glob('references/craft/*.md')]
+        paths = [SKILL_ROOT / 'SKILL.md', *SKILL_ROOT.glob('references/craft/*.md'),
+                 *SKILL_ROOT.glob('references/modes/*.md'),
+                 *SKILL_ROOT.glob('references/genres/*.md'),
+                 *SKILL_ROOT.glob('references/publish/platforms/*.md')]
         for sample in self.SAMPLES:
             hits = [p.name for p in paths if sample in p.read_text(encoding='utf-8')]
             with self.subTest(sample=sample):
@@ -495,6 +526,33 @@ class SingleSourceTests(unittest.TestCase):
         self.assertNotIn('craft/voice.md', text)
         self.assertFalse((SKILL_ROOT / 'references' / 'craft' / 'voice.md').exists())
 
+
+
+class GenreRoutingTests(unittest.TestCase):
+    """Each form lives in one genres/ file and the routing table in SKILL.md lists every one of them."""
+
+    def test_every_genre_file_is_routed(self):
+        table = (SKILL_ROOT / 'SKILL.md').read_text(encoding='utf-8')
+        for folder in ('genres', 'modes'):
+            for path in (SKILL_ROOT / 'references' / folder).glob('*.md'):
+                if path.name in ('README.md', 'prose.md'):
+                    continue
+                with self.subTest(file=f'{folder}/{path.name}'):
+                    self.assertIn(f'`references/{folder}/{path.name}`', table)
+
+    def test_old_single_files_are_gone(self):
+        craft = SKILL_ROOT / 'references' / 'craft'
+        for name in ('format.md', 'examples.md', 'fiction.md'):
+            with self.subTest(name=name):
+                self.assertFalse((craft / name).exists())
+        self.assertFalse((SKILL_ROOT / 'references' / 'genres' / 'README.md').exists())
+
+    def test_skill_wires_craft_files(self):
+        text = (SKILL_ROOT / 'SKILL.md').read_text(encoding='utf-8')
+        for name in ('modes/prose.md', 'craft/structure.md', 'craft/hooks.md',
+                     'craft/material.md', 'craft/title.md'):
+            with self.subTest(name=name):
+                self.assertIn(f'references/{name}', text)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

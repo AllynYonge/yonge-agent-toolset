@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """检查中文成稿的硬禁令与常见模型化形状。只报警，不自动改文。
 
-默认只检查 SKILL.md 与 references/quality/revision.md 写明的硬禁令和形状提醒，不读任何配置。
-每条结果带 revision.md 的规则编号，--json 输出的 issues 里同时给出 code、name 和 level。
+默认只检查 SKILL.md 与 references/quality/ai-traces.md 写明的硬禁令和形状提醒，不读任何配置。
+每条结果带规则名，与审查维度文件的小节标题一致，--json 输出的 issues 里同时给出 name、file 和 level。
 传入 --profile、--extend 或 --length 时，额外检查账号配置的篇幅与规避词。
 配置解析由 resolve_preferences.py 负责，本脚本不重复实现。
 """
@@ -19,30 +19,6 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 
-PIVOT_PATTERNS = (
-    re.compile(r"(?:并)?不是[^。！？\n]{0,90}而是"),
-    re.compile(r"并非[^。！？\n]{0,90}而是"),
-    re.compile(r"不在于[^。！？\n]{0,90}而在于"),
-    re.compile(r"与其说[^。！？\n]{0,90}(?:不如|毋宁|倒不如)"),
-    re.compile(r"[。！？!?]\s*而是"),
-    re.compile(r"表面(?:上)?[^。！？\n]{0,90}(?:其实|实际|实则)"),
-    re.compile(r"看似[^。！？\n]{0,90}(?:其实|实际|实则)"),
-)
-
-SEMANTIC_PIVOT_PATTERNS = (
-    re.compile(r"(?:总|一直|曾|都)?以为[^！？\n]{2,60}?(?:其实|才发现|才明白|才知道|后来才)"),
-    re.compile(r"(?:总|都|一直)以为[^！？\n]{2,60}?[。，](?:可|但|其实)"),
-    re.compile(r"回头(?:看|一看)?才(?:发现|明白|知道)"),
-    re.compile(r"(?:并)?不是[^。！？\n]{1,40}，(?:更|才)?是[^，。！？\n]"),
-    re.compile(r"从来(?:都)?(?:不是|与[^。！？，\n]{1,12}无关)"),
-    re.compile(r"答案(?:是否定的|恰恰相反)|恰恰相反"),
-    re.compile(r"表面(?:上)?[^！？\n]{0,60}。[^！？\n]{0,12}(?:其实|实际|实则)"),
-    re.compile(r"看似[^！？\n]{0,60}。[^！？\n]{0,12}(?:其实|实际|实则)"),
-    re.compile(r"[^，。！？\n]{1,12}不重要，(?:重要|要紧)的是"),
-    re.compile(r"真正[^，。！？\n]{0,16}的(?:，)?是"),
-    re.compile(r"不只(?:是)?[^。！？\n]{0,90}(?:还|也)"),
-)
-
 NOMINALIZATION_PATTERNS = (
     re.compile(r"进行(?:了|一次|一场|着)?[^。，！？\n]{0,10}(?:调整|优化|升级|分析|讨论|沟通|梳理|复盘|迭代|探索|尝试|思考|规划|布局)"),
     re.compile(r"实现了?[^。，！？\n]{0,14}的?[^。，！？\n]{0,6}(?:提升|增长|突破|转变|跃升|落地)"),
@@ -57,19 +33,20 @@ LEFT_BRANCH_PATTERNS = (
     re.compile(r"(?:^|[。！？]\s*)(?:真正|最终|最后)让[^，。！？\n]{8,70}的，是"),
 )
 
-# 每条结果的编号与 references/quality/revision.md 的小节一一对应，修改时按编号找修法。
-RULE_NAMES = {
-    "S2": "翻案腔",
-    "S3": "排比",
-    "S4": "假深刻",
-    "S5": "名词化与翻译腔",
-    "S6": "主干太晚",
-    "S7": "节奏",
-    "C1": "篇幅",
-    "C2": "规避词",
+# 每条规则名对应审查维度文件里的同名小节，修改时按规则名找修法。
+AI_TRACES = "references/quality/ai-traces.md"
+REVISION = "references/quality/revision.md"
+RULE_FILES = {
+    "排比": AI_TRACES,
+    "假深刻": AI_TRACES,
+    "名词化与翻译腔": AI_TRACES,
+    "主干太晚": AI_TRACES,
+    "节奏": AI_TRACES,
+    "篇幅": REVISION,
+    "规避词": REVISION,
 }
 
-CONSTRAINT_CODES = {"length": "C1", "avoid_word": "C2"}
+CONSTRAINT_RULES = {"length": "篇幅", "avoid_word": "规避词"}
 
 
 @dataclass
@@ -395,50 +372,26 @@ def main() -> int:
     warnings = []
     issues = []
 
-    def record(level: str, code: str, message: str) -> None:
-        name = RULE_NAMES[code]
-        issues.append({"code": code, "name": name, "level": level, "message": message})
-        (failures if level == "fail" else warnings).append(f"[{code} {name}] {message}")
+    def record(level: str, name: str, message: str) -> None:
+        issues.append({"name": name, "file": RULE_FILES[name], "level": level, "message": message})
+        (failures if level == "fail" else warnings).append(f"[{name}] {message}")
 
-    def fail(code: str, message: str) -> None:
-        record("fail", code, message)
+    def fail(name: str, message: str) -> None:
+        record("fail", name, message)
 
-    def warn(code: str, message: str) -> None:
-        record("warn", code, message)
-
-    pivots = all_matches(prose, PIVOT_PATTERNS)
-    for match in pivots:
-        fail("S2",
-            f"禁用翻案句，第 {line_number(text, match.start())} 行，"
-            f"“{excerpt(match.group())}”"
-        )
-
-    occupied_spans = [match.span() for match in pivots]
-    semantic_pivots = []
-    for match in all_matches(prose, SEMANTIC_PIVOT_PATTERNS):
-        if any(
-            match.start() < end and match.end() > start
-            for start, end in occupied_spans
-        ):
-            continue
-        semantic_pivots.append(match)
-        occupied_spans.append(match.span())
-    for match in semantic_pivots:
-        warn("S2",
-            f"疑似翻案腔变形，第 {line_number(text, match.start())} 行，"
-            f"“{excerpt(match.group(), 44)}”。先立误解再推翻就改成正面陈述，正常用法保留。"
-        )
+    def warn(name: str, message: str) -> None:
+        record("warn", name, message)
 
     anaphoras = anaphora_runs(prose)
     for match in anaphoras[:4]:
-        warn("S3",
+        warn("排比",
             f"三连以上同构排比，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group(), 44)}”。留两项，第三项换说法或删掉。"
         )
 
     nominalizations = all_matches(prose, NOMINALIZATION_PATTERNS)
     for match in nominalizations[:4]:
-        warn("S5",
+        warn("名词化与翻译腔",
             f"名词化句式，第 {line_number(text, match.start())} 行，"
             f"“{excerpt(match.group(), 36)}”。还原成直接的动词。"
         )
@@ -447,13 +400,13 @@ def main() -> int:
     highlight_limit = max(3, total_han // 700)
     if len(highlights) > highlight_limit:
         samples = "、".join(dict.fromkeys(match.group() for match in highlights[:6]))
-        warn("S4",
+        warn("假深刻",
             f"「」括起的短语共 {len(highlights)} 处。{samples}。太密说明在批量造金句。"
         )
 
     cv_result = sentence_length_cv(prose)
     if cv_result and cv_result[0] < 0.42:
-        warn("S7",
+        warn("节奏",
             f"全文 {cv_result[1]} 个句子长度过于接近（变异系数 {cv_result[0]:.2f}）。"
             "人写的段落里十个字的句子会挨着四十个字的句子，放开几句，压短几句。"
         )
@@ -465,7 +418,7 @@ def main() -> int:
             f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 44)}”"
             for match in left_branches[:4]
         )
-        warn("S6",
+        warn("主干太晚",
             f"长前置成分共 {len(left_branches)} 处，可能让主干来得太晚。{samples}"
         )
 
@@ -476,7 +429,7 @@ def main() -> int:
             f"第 {line_number(text, match.start())} 行“{excerpt(match.group(), 44)}”"
             for match in dense_de[:4]
         )
-        warn("S6",
+        warn("主干太晚",
             f"有 {len(dense_de)} 个长句包含四个以上的“的”，可能要先交代人和动作。{samples}"
         )
 
@@ -485,14 +438,14 @@ def main() -> int:
         one_sentence = sum(paragraph.sentences <= 1 for paragraph in paragraphs)
         ratio = one_sentence / len(paragraphs)
         if ratio >= 0.75:
-            warn("S7",
+            warn("节奏",
                 f"可识别段落中有 {ratio:.0%} 只有一句话，可能形成统一的短段鼓点。"
             )
 
     streak = short_streak(paragraphs)
     if streak:
         first = streak[0]
-        warn("S7",
+        warn("节奏",
             f"从第 {line_number(text, first.position)} 行起连续出现 {len(streak)} 个短促单句段，"
             "检查是否在排队喊结论。"
         )
@@ -501,12 +454,11 @@ def main() -> int:
 
     if constraint_report is not None:
         for issue in constraint_report["issues"]:
-            fail(CONSTRAINT_CODES[issue["type"]], issue["message"])
+            fail(CONSTRAINT_RULES[issue["type"]], issue["message"])
         for issue in constraint_report["warnings"]:
-            warn(CONSTRAINT_CODES[issue["type"]], issue["message"])
+            warn(CONSTRAINT_RULES[issue["type"]], issue["message"])
 
     summary = (
-        f"翻案句 {len(pivots)}，翻案腔变形 {len(semantic_pivots)}，"
         f"同构排比 {len(anaphoras)}，名词化 {len(nominalizations)}，"
         f"长前置成分 {len(left_branches)}，重定语句 {len(dense_de)}"
     )
@@ -540,7 +492,7 @@ def main() -> int:
             )
     print(summary)
     if failures or warnings:
-        print("每项开头的编号对应 references/quality/revision.md 的同名小节，按编号找修法。")
+        print(f"每项开头是规则名，篇幅和规避词见 {REVISION}，其余见 {AI_TRACES}，找同名小节。")
 
     if failures:
         print("\n需要修改")

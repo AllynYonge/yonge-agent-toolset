@@ -28,7 +28,7 @@
 
 - `words_to_avoid` 与 EXTEND.md 全局 `avoid_words` 取并集生效
 - `compliance_guardrails` 是可选的独立内容边界，不是声音参数；可放在 `custom_style` 中作为回退，优先放在账号级。仅使用 resolver 已解析的顶层清单，执行规则见 `references/publish/overview.md`「合规红线」，不要重复写进风格描述
-- `preferred_opening` 是偏好而非强制——内容需要时可选其他开头方式。有平台时同时参考形态文件的开篇钩子。`contradiction` 是把两件对不上的事实摆在一起，不是先立误解再推翻
+- `preferred_opening` 是偏好而非强制——内容需要时可选其他开头方式。有平台时同时参考形态文件的开篇钩子。`contradiction` 是把两件对不上的事实摆在一起
 - `ending_style` 服从 SKILL.md「动笔前先找到说话位置」定下的结尾落点
 - 实操细节、现实质疑、不确定性承认、冷幽默（若风格允许）在自然位置出现，不当清单逐项塞入
 - Never 在风格定义里混入平台约束（段落字数、emoji 策略）或媒介约束（叙事结构、开篇钩子）——那属于 [platforms/](platforms/)

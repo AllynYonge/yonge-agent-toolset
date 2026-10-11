@@ -1,6 +1,6 @@
 ---
 name: human-writing
-description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长帖、公众号文章、博客、评论、人物故事、历史叙事、新闻与行业解读、科普、教程、评测、个人叙事、小说、故事、对白、口播和演讲稿，也用于润色、去 AI 味、查 AI 痕迹和按平台改写。覆盖公众号和小红书发布，包括种草笔记、想选题、发布前合规审核和多账号风格配置。也用于分析拆解一篇文章，包括提取核心观点、生成阅读笔记、深度解读、从文章里找创作灵感和选题方向；用户只说“帮我看看这篇文章”“这篇文章讲了什么”也应使用。默认写成一个见过事、查过材料、愿意把来龙去脉讲清楚的人在说话，保留中文互联网长回答与长帖的活人感和自然韵律，避免机构腔、演说腔、营销腔和模型腔。
+description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长帖、公众号文章，也用于起标题、搭文章框架，也用于润色、去 AI 味、查 AI 痕迹和按平台改写。覆盖公众号和小红书发布，包括种草笔记、想选题、发布前合规审核和多账号风格配置。也用于分析拆解一篇文章，包括提取核心观点、生成阅读笔记、深度解读、从文章里找创作灵感和选题方向；用户只说“帮我看看这篇文章”“这篇文章讲了什么”也应使用。默认写成一个见过事、查过材料、愿意把来龙去脉讲清楚的人在说话，保留中文互联网长回答与长帖的活人感和自然韵律，避免机构腔、演说腔、营销腔和模型腔。
 ---
 # 活人感写作
 
@@ -18,7 +18,7 @@ description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长�
 - 想选题，或者只给了宽泛话题、没有明确的切入角度，先按「七步流程」第 1 步读配置，再按第 3 步的选题分支派 `agents/topic-selector.md`。
 - 分析、拆解一篇文章，或者想从文章里找创作方向，读取 `references/tasks/analyze.md`。
 - 审核合规或质量，读取 `agents/reviewer.md`「审核模式入口」。
-- 只查 AI 痕迹，按 `references/quality/revision.md`「什么时候做哪几层」运行 `scripts/check_prose.py` 并做句子层检查，按「只查 AI 痕迹的报告」出报告，不修改原稿。
+- 只查 AI 痕迹，读取 `agents/reviewer.md`「审核模式入口」，只启用去 AI 味维度，不修改原稿。
 - 用户只说“帮我看看”“这篇改改”时，按材料是谁的来判断。给的是别人的文章或链接，进入分析模式。给的是用户自己的稿子，或者看不出是谁的，问一句是想直接改，还是先看哪里有问题。
 
 ## 内容靠什么站住
@@ -43,7 +43,7 @@ description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长�
 
 新写和改稿走同一条流程，第 2、3、5 步分新写和改稿两支。标着「有配置时」的内容，在没有账号配置、目标平台和风格时全部跳过。
 
-少于 500 字、只需要语气修复或小幅润色的改稿，按读取、修复、检查三步执行。读取对应第 1 步和第 2 步的改稿分支，有配置时照样取合规清单，并记下不能改的东西。修复对应第 5 步，按 `references/tasks/rewrite.md` 当前档位改写。检查对应第 6 步，先按 `references/quality/revision.md` 只做句子层，再照常执行综合审核。第 3、4 步跳过，第 7 步照常交稿。
+少于 500 字、只需要语气修复或小幅润色的改稿，按读取、修复、检查三步执行。读取对应第 1 步和第 2 步的改稿分支，有配置时照样取合规清单，并记下不能改的东西。修复对应第 5 步，按 `references/tasks/rewrite.md` 当前档位改写。检查对应第 6 步，先按 `references/quality/ai-traces.md` 只做句子层，再照常执行综合审核。第 3、4 步跳过，第 7 步照常交稿。
 
 1. **读配置。** 工作目录或用户目录下存在 `.human-writing/EXTEND.md`，或者带了 `--profile` 参数时，运行下面的命令，只使用它返回的结果，不直接读取 EXTEND.md。否则跳过，合规清单按 `[]` 处理。账号、合规红线、`length` 和 `deep` 的用法见 `references/publish/overview.md`。
    ```bash
@@ -61,39 +61,52 @@ description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长�
    - 从分析模式带来的「选题交接信息」在这里进入，视为用户已明确指定的切入角度，直接使用，不派选题子代理。
 4. **定调。**
    - 起草时读哪些文件：按下面几条组合读取，不为保险一次加载全部参考文件。
-     - 现实稿不另读文件。虚构稿读 `references/craft/fiction.md`。虚构故事里涉及真实城市、历史、职业、药物、法律的部分，按现实稿核实。
-     - 形式只读 `references/craft/format.md` 中当前形式那一节，按该文件开头的对照表找。小说、故事等虚构叙事没有单独一节，跳过。
-     - 现代白话散文都读 `references/craft/prose.md`，它是默认写法。剧本、对白和诗歌不读它，按 `format.md` 对应小节写。需要参照完整片段时，读 `references/craft/examples.md` 中当前形式那一节。
-     - 改稿先读 `references/tasks/rewrite.md`，再按稿件性质组合上面的文件。
-   - 风格：配置了风格或用户要求模仿时，按 `references/publish/style.md`「风格来源与优先级」确定。都没有时按本文件的默认写法写。
+     - 现代白话散文都读 `references/modes/prose.md`，它是默认写法。剧本、对白和诗歌不读它，按对照表里对应的文件写。
+     - 形式按下文「不同形式怎样写」对照表只读对应的一个文件；用户指定的形式覆盖默认写法。
    - 平台与媒介：按 `references/publish/overview.md`「平台检测」「媒介检测」确定，确定后读取 `references/publish/platforms/{platform}-{medium}.md`。判断不出平台时不套用平台形态。
 5. **动笔。** 起草初稿。
    - 先在内部走完「动笔前先找到说话位置」。
-   - 新写按第 4 步读入的起草文件写，散文以 `references/craft/prose.md` 为默认写法。改稿按 `references/tasks/rewrite.md` 对应的 `--deep` 档位改写。
+   - 新写按第 4 步读入的起草文件写，散文以 `references/modes/prose.md` 为默认写法。改稿按 `references/tasks/rewrite.md` 对应的 `--deep` 档位改写。
    - 指定平台时，把平台文件的「起草侧重」叠加在通用写法上。形态侧重优先于通用倾向，但不越过硬禁令、材料边界和 `length` 上限。
    - 有合规清单时，动笔前逐条核对标题、论点、叙事路径、案例和行动建议。有冲突先处理，不把违规主张写进正文。
    - 预估成稿超过 `long_threshold`（默认 3000 字）时分节写。先把叙事路径展开成分节大纲，每节写一句意图和计划用的材料，与用户确认后分节起草。每完成一节，按 `references/tasks/rewrite.md`「长稿逐节处理」检查衔接。
    - 每完成一段，在内部确认这一段给读者增加了什么他之前不知道的东西。答不出，合并或删掉。
-6. **综合审核。** 所有新写和改稿都执行这一步,包括少于 500 字的短改稿。先呈现初稿,附 2 到 4 条优化建议供用户确认。用户确认(或提出修改意见、采纳建议)后,派 `agents/reviewer.md` 执行综合审核(脚本检查 + 人工审核 + 质量把关),主代理根据报告修改,最多 3 轮。传递给子代理的上下文包括:完整文章、第 2 步记录的不能改的东西、第 4 步的风格约束和平台要求、完整合规清单、resolver 返回的 `constraint_check_args`。调度与修改闭环见 `agents/reviewer.md`。
+6. **综合审核。** 所有新写和改稿都执行这一步,包括少于 500 字的短改稿。先呈现初稿,附 2 到 4 条优化建议供用户确认。现实类文章按 `references/craft/title.md` 从成稿里取 3 个候选标题一并呈现,用户已指定标题时只给建议不替换。用户确认(或提出修改意见、采纳建议)后,派 `agents/reviewer.md` 执行综合审核(脚本检查 + 按启用维度审核),主代理根据报告修改,最多 3 轮。传递给子代理的上下文包括:完整文章、第 2 步记录的不能改的东西、第 4 步的风格约束和平台要求、完整合规清单、resolver 返回的 `constraint_check_args`。调度与修改闭环见 `agents/reviewer.md`。
 7. **交稿。** 按下文「交稿」执行。
 
-## 动笔前先找到说话位置
+### 不同形式怎样写
 
-在内部回答下面五件事，不把答案原样交给用户。
+这个目录只处理形式差异，一种形式一个文件，规则和示范放在一起。起草时只读当前形式对应的一个文件，按下表找。用户指定的形式覆盖默认写法，说话者、材料、推进和事实边界仍由主流程决定。诗歌、剧本、对白和实验写作不强行套用现代散文的完整主干与段落形状。
 
-1. 谁在说这件事。他凭什么知道，又有哪些地方只是在推测。
-2. 什么事情让他现在想说。可以是一条新闻、一次经历、一个疑问或一件一直想不通的小事。
-3. 手里有哪些能托住文章的东西。优先找动作、数字、时间、地点、原话、失败、代价与后来结果。
-4. 他对哪一点有明确判断。这个判断依据什么，又到哪里为止。
-5. 读者知道上一段以后，最自然会追问什么。
+下表把三类文件放在一起查。`references/modes/` 管用哪种语体写，散文、诗歌、剧本对白三者互相替代，只读一个。`references/genres/` 管写的是哪类内容。`references/publish/platforms/` 管发在哪个平台，平台检测见 `references/publish/overview.md`，表里列出的平台文件在用户点明平台时读。
 
-答完以后再定三件事，同样留在内部。
+「示范」一节的片段均为虚构，「原课程实战范例」一节是 Vicky《公众号变现 25 讲》里发表过的文章开头。两者都只示范写法，不能把其中的人物、数字和经历拿去冒充事实。
 
-- 论点句：把第四项的判断压成一句能辩护的正面判断。
-- 叙事路径：用一句话说清文章从什么状态出发、经过什么变化、到达什么落点。路径由材料之间的因果决定，不列功能角色清单。
-- 结尾落点：文章在哪里可以停。
+「必读」列的文件每次起草都要读。形式对应的文件（`references/modes/`、`references/genres/`、`references/publish/platforms/` 下的文件）确定用哪种语体写、写哪类内容；`prose.md` 是散文的默认写法，诗歌、剧本和虚构叙事不读它。「按需」列的文件在篇幅较长、需要先搭架子，或者用户要求时才读，它们是通用写法：`references/craft/hooks.md`（开头、结尾与金句）、`references/craft/structure.md`（框架与结构范式）和 `references/craft/material.md`（素材）。标题不在起草时读，成稿以后按 `references/craft/title.md` 取，所有现实类文章都适用。
 
-现实稿的第三项太少，先补材料或缩小题目。六千字现实长文需要能展开多个阶段、案例或现实关系。虚构稿缺少人物目标、行动和场景变化时，回到 `references/craft/fiction.md` 补出故事，不向用户索要现实出处。
+| 形式 | 必读 | 按需 |
+| --- | --- | --- |
+| 知乎回答、问答 | `references/publish/platforms/zhihu-answer.md`、`prose.md` | `hooks.md`、`structure.md`、`material.md` |
+| 论坛长帖、连载帖、帖子体小说 | `references/publish/platforms/forum-post.md`、`prose.md` | — |
+| 公众号文章 | `references/publish/platforms/wechat-article.md`、`prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 博客长文 | `prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 人物稿、历史稿 | `references/genres/profile-history.md`、`prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 新闻、产品、行业解读 | `references/genres/news-product.md`、`prose.md` | `hooks.md`、`structure.md`、`material.md` |
+| 观点、评论、认知观点文 | `references/genres/opinion.md`、`prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 读书观点文、书评 | `references/genres/book-opinion.md`、`prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 个人叙事、散文、个人成长文 | `references/genres/personal-narrative.md`、`prose.md`、`hooks.md` | `structure.md`、`material.md`（个人成长文必读） |
+| 清单体、金句体 | `references/genres/listicle.md`、`prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 小红书笔记 | `references/publish/platforms/xhs-note.md`、`prose.md` | `hooks.md`、`structure.md`、`material.md` |
+| 公众号短图文 | `references/publish/platforms/wechat-note.md`、`prose.md` | `hooks.md`、`structure.md`、`material.md` |
+| 其他短文、社交内容 | `prose.md` | `hooks.md`、`structure.md`、`material.md` |
+| 教程、方法、实操干货文 | `references/genres/tutorial.md`、`prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 评测、商业稿 | `references/genres/review-commercial.md`、`prose.md`、`hooks.md`、`structure.md`、`material.md` | — |
+| 口播、播客、演讲稿 | `references/genres/spoken-script.md`、`prose.md` | `hooks.md`、`structure.md`、`material.md` |
+| 剧本、对白 | `references/modes/screenplay-dialogue.md` | — |
+| 诗歌、分行抒情 | `references/modes/poetry.md` | — |
+| 小说、故事等虚构叙事 | `references/genres/fiction.md`、`prose.md` | — |
+
+表里找不到的形式，选最接近的一个文件，判断不出就只按 `references/modes/prose.md` 写。
 
 ## 成稿绝对不能出现
 
@@ -101,7 +114,6 @@ description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长�
 
 检验办法是把句子改成平铺直叙的陈述。读者拿到的信息一点没少，原来的写法就只是在抬价，按命中处理。
 
-- 翻案腔。先替读者立一个他并没有的误解，再推翻它，借反差抬高后面的判断。判断直接从正面下，先给判断，再给依据。文章确实用材料走过从误解到修正的过程时，可以保留一次自我修正，但不套用任何固定句式。“不只……还……”是正常递进，放在翻案位置抬价时才算命中。常见变形见 `references/quality/revision.md` S2。
 - 三项以上的同构排比。同一个引导词或句型连用三次以上，留两项，第三项换说法或删掉。
 - 给抽象名词配具体动作来抒情。“时间保管细节”“焦虑显出形状”一类，还原成人做了什么、发生了什么。写具体事物时不受影响。
 - 动词名词化。“完成了对流程的优化”写成“把流程改顺了”，“实现了效率的提升”写成快了多少、省了几个人。
@@ -120,8 +132,8 @@ description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长�
 
 1. 当前用户明确指定的文稿类型、现实或虚构性质、语气和交付形式。
 2. 内容的边界。现实内容服从事实边界，虚构内容服从人物、因果与世界规则。账号配置的合规红线与这一级同等优先。
-3. `references/craft/fiction.md`、`references/craft/format.md`、`references/tasks/rewrite.md` 和 `references/publish/platforms/` 中与当前任务直接相关的规则。
-4. `references/craft/prose.md` 的默认散文写法，以及选用的 `custom_style`。
+3. 对照表指向的当前形式文件（`references/genres/` 下的文件，以及 `references/modes/` 下除 `prose.md` 以外的文件）、`references/tasks/rewrite.md` 和 `references/publish/platforms/` 中与当前任务直接相关的规则。
+4. 默认写法，包括 `references/modes/prose.md`，`references/craft/` 下的 `structure.md`、`hooks.md`、`material.md` 和 `title.md`，以及选用的 `custom_style`。
 5. `references/quality/revision.md` 的改稿规则与检查脚本的提醒。
 
 「成稿绝对不能出现」不参与这个排序，任何一级都不能放松它。平台形态文件、`custom_style` 和选题模板里的示例句、保留词和论点句式命中硬禁令时，一律不执行。
