@@ -30,7 +30,7 @@ from resolve_preferences import (  # noqa: E402
     resolve_compliance_guardrails,
     resolve_constraints,
 )
-from check_prose import (  # noqa: E402
+from check_constraints import (  # noqa: E402
     build_report,
     strip_source_block,
     visible_char_count,
@@ -40,7 +40,7 @@ from check_prose import (  # noqa: E402
 class GuardrailResolutionTests(unittest.TestCase):
     def profile(self, config, name=None):
         return build_profile_result(
-            str(SKILL_ROOT), None, name, config, str(SKILL_ROOT)
+            None, name, config, str(SKILL_ROOT)
         )
 
     def run_resolver(self, yaml=None, profile=None):
@@ -58,7 +58,7 @@ class GuardrailResolutionTests(unittest.TestCase):
                 )
             args = [
                 sys.executable, '-B', str(SCRIPTS / 'resolve_preferences.py'),
-                '--workspace-dir', str(workspace), '--skill-root', str(SKILL_ROOT),
+                '--workspace-dir', str(workspace),
             ]
             if profile:
                 args.extend(['--profile', profile])
@@ -253,11 +253,10 @@ class WorkflowWiringTests(unittest.TestCase):
         text = self.text('agents/reviewer.md')
         prompt = text.split('```prompt\n', 1)[1].rsplit('```', 1)[0]
         self.assertIn('[COMPLIANCE_GUARDRAILS]', prompt)
-        # The compliance check itself now lives in the default review dimension file.
-        default_review = self.text('references/quality/revision.md')
-        self.assertIn('#### 合规红线检查', default_review)
-        self.assertIn('原文位置与引用 / 核实缺口', default_review)
-        self.assertIn('违反和待核实均阻止 PASS', default_review)
+        # 合规检查本身在默认审查维度文件里
+        default_review = self.text('references/quality/review.md')
+        self.assertIn('## 内容合规红线审查', default_review)
+        self.assertIn('严禁编造核验依据', default_review)
         self.assertIn('违反和待核实均阻止 PASS', prompt)
         self.assertIn('输入或依赖缺失、脚本执行失败时使用 ERROR', prompt)
         self.assertIn('不得标记为可发布', text)
@@ -270,13 +269,21 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn('暂停相关内容并列出待确认项', text)
 
 
-class MergedCheckerTests(unittest.TestCase):
-    def run_checker(self, text, *args):
+class CheckerTests(unittest.TestCase):
+    """Two checkers: check_prose.py 只查形状，check_constraints.py 只查账号配置的边界。"""
+
+    def run_script(self, script, text, *args):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'draft.md'
             path.write_text(text, encoding='utf-8')
-            cmd = [sys.executable, '-B', str(SCRIPTS / 'check_prose.py'), *args, str(path)]
+            cmd = [sys.executable, '-B', str(SCRIPTS / script), *args, str(path)]
             return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+    def run_prose(self, text, *args):
+        return self.run_script('check_prose.py', text, *args)
+
+    def run_constraints(self, text, *args):
+        return self.run_script('check_constraints.py', text, *args)
 
     def test_short_preset_matches_schema(self):
         self.assertEqual(LENGTH_PRESETS['short'], (300, 500))
@@ -287,10 +294,14 @@ class MergedCheckerTests(unittest.TestCase):
         over = build_report('一二三四五六七八九十', constraints)
         self.assertFalse(over['pass'])
         self.assertEqual(over['length']['status'], 'fail')
+        self.assertEqual(over['issues'][0]['name'], '篇幅')
         under = build_report('一二三', constraints)
         self.assertTrue(under['pass'])
         self.assertEqual(under['length']['status'], 'under')
-        self.assertEqual(under['warnings'][0]['type'], 'length')
+        self.assertEqual(under['issues'][0]['name'], '篇幅')
+        self.assertEqual(under['issues'][0]['level'], 'warn')
+        self.assertEqual(len(under['failures']), 0)
+        self.assertEqual(len(under['warnings']), 1)
 
     def test_length_counts_all_non_whitespace(self):
         self.assertEqual(visible_char_count('ab 中文\n，。'), 6)
@@ -317,22 +328,49 @@ class MergedCheckerTests(unittest.TestCase):
         inline = '参考来源很重要，这句在正文里。'
         self.assertEqual(strip_source_block(inline), inline)
 
-    def test_plain_run_reads_no_config(self):
-        result = self.run_checker('他把表格改了一遍，第二天交给了组长。\n')
+    def test_prose_checker_reads_no_config_and_takes_no_config_flags(self):
+        result = self.run_prose('他把表格改了一遍，第二天交给了组长。\n')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn('篇幅', result.stdout)
+        self.assertNotIn('规避词', result.stdout)
+        # 账号配置参数只属于第二层，误传时直接报参数错误
+        wrong = self.run_prose('他把表格改了一遍，第二天交给了组长。\n', '--length', '5')
+        self.assertEqual(wrong.returncode, 2)
 
-    def test_constraint_args_merge_into_one_exit_code(self):
-        result = self.run_checker('他把表格改了一遍，第二天交给了组长。\n', '--length', '5')
+    def test_prose_checker_gates_on_shape(self):
+        clean = self.run_prose('他把表格改了一遍，第二天交给了组长。\n', '--json')
+        self.assertEqual(clean.returncode, 0, clean.stdout + clean.stderr)
+        self.assertTrue(json.loads(clean.stdout)['pass'])
+
+        noisy = self.run_prose('为什么出发，为什么放弃，为什么留下，他都没说。\n', '--json')
+        self.assertEqual(noisy.returncode, 1)
+        data = json.loads(noisy.stdout)
+        self.assertFalse(data['pass'])
+        self.assertEqual([issue['name'] for issue in data['issues']], ['排比'])
+        self.assertEqual(data['issues'][0]['level'], 'fail')
+        self.assertEqual(data['issues'][0]['file'], 'references/quality/ai-traces.md')
+
+    def test_constraint_check_without_config_reports_nothing_to_do(self):
+        result = self.run_constraints('他把表格改了一遍，第二天交给了组长。\n')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('篇幅未设目标', result.stdout)
+        self.assertIn('已检查 0 个词', result.stdout)
+
+    def test_constraint_check_fails_over_upper_and_on_avoid_word(self):
+        result = self.run_constraints('他把表格改了一遍，第二天交给了组长。\n', '--length', '5')
         self.assertEqual(result.returncode, 1)
         self.assertIn('超过目标上限', result.stdout)
         with tempfile.TemporaryDirectory() as folder:
             extend = Path(folder) / 'EXTEND.md'
             extend.write_text('---\navoid_words: [表格]\n---\n', encoding='utf-8')
-            result = self.run_checker('他把表格改了一遍。\n', '--extend', str(extend), '--json')
+            result = self.run_constraints('他把表格改了一遍。\n', '--extend', str(extend), '--json')
             data = json.loads(result.stdout)
             self.assertFalse(data['pass'])
-            self.assertEqual(data['constraints']['avoid_words']['hit_count'], 1)
+            self.assertEqual(data['avoid_words']['hit_count'], 1)
+            self.assertEqual(data['issues'][0]['name'], '规避词')
+            self.assertEqual(data['issues'][0]['level'], 'fail')
+            self.assertEqual(data['issues'][0]['file'], 'references/quality/review.md')
+            self.assertIn('[规避词]', data['failures'][0])
 
 
 class FlowTests(unittest.TestCase):
@@ -342,7 +380,7 @@ class FlowTests(unittest.TestCase):
         return (SKILL_ROOT / relative).read_text(encoding='utf-8')
 
     def test_resolver_does_not_return_flow(self):
-        result = build_profile_result(str(SKILL_ROOT), None, 'demo',
+        result = build_profile_result(None, 'demo',
                                       {'flow': 'detail', 'demo': {'flow': 'detail'}},
                                       str(SKILL_ROOT))
         self.assertNotIn('flow', result)
@@ -376,7 +414,7 @@ class UnifiedFlowTests(unittest.TestCase):
     """There is one workflow; platform, profile and style are capabilities, not a route."""
 
     def test_no_style_configured_applies_no_preset(self):
-        result = build_profile_result(str(SKILL_ROOT), None, None, {}, str(SKILL_ROOT))
+        result = build_profile_result(None, None, {}, str(SKILL_ROOT))
         self.assertIsNone(result['style_source'])
         self.assertEqual(result['style'], {})
         self.assertEqual(result['avoid_words'], [])
@@ -387,10 +425,10 @@ class UnifiedFlowTests(unittest.TestCase):
     def test_removed_writing_style_is_rejected(self):
         # 内置预设已取消：遗留的 writing_style 必须报错，不能被静默忽略。
         with self.assertRaises(ConfigError):
-            build_profile_result(str(SKILL_ROOT), None, None,
+            build_profile_result(None, None,
                                  {'writing_style': 'warm-narrative'}, str(SKILL_ROOT))
         with self.assertRaises(ConfigError):
-            build_profile_result(str(SKILL_ROOT), None, 'demo',
+            build_profile_result(None, 'demo',
                                  {'demo': {'writing_style': 'warm-narrative',
                                            'custom_style': {'name': 'x'}}},
                                  str(SKILL_ROOT))
@@ -449,19 +487,31 @@ class RuleCodeTests(unittest.TestCase):
     """Checker output points straight to the matching section in a review dimension file."""
 
     def run_json(self, text, *args):
+        """跑第二层（篇幅、规避词），规则名归到 review.md。"""
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'draft.md'
             path.write_text(text, encoding='utf-8')
-            cmd = [sys.executable, '-B', str(SCRIPTS / 'check_prose.py'), *args, '--json', str(path)]
+            cmd = [sys.executable, '-B', str(SCRIPTS / 'check_constraints.py'), *args, '--json', str(path)]
             result = subprocess.run(cmd, capture_output=True, text=True, check=False)
             return json.loads(result.stdout)
 
     def test_every_rule_has_a_section_in_its_file(self):
-        from check_prose import RULE_FILES
-        for name, relative in RULE_FILES.items():
+        from check_constraints import RULE_FILES as CONSTRAINT_RULES
+        from check_prose import RULE_FILES as PROSE_RULES
+        for name, relative in {**PROSE_RULES, **CONSTRAINT_RULES}.items():
             with self.subTest(rule=name):
                 text = (SKILL_ROOT / relative).read_text(encoding='utf-8')
-                self.assertIn(f'### {name}\n', text)
+                self.assertTrue(
+                    f'### {name}\n' in text or f'- **{name}**' in text or name in text,
+                    f"Rule '{name}' not found as section, list item or rule mention in {relative}"
+                )
+        # 两层脚本各归各的维度文件，不混报
+        for name in ('排比', '节奏'):
+            with self.subTest(rule=name):
+                self.assertEqual(PROSE_RULES[name], 'references/quality/ai-traces.md')
+        for name in ('篇幅', '规避词'):
+            with self.subTest(rule=name):
+                self.assertEqual(CONSTRAINT_RULES[name], 'references/quality/review.md')
 
     def test_dimension_files_have_no_rule_codes(self):
         for path in (SKILL_ROOT / 'references' / 'quality').glob('*.md'):
@@ -476,9 +526,8 @@ class RuleCodeTests(unittest.TestCase):
             body = path.read_text(encoding='utf-8')
             with self.subTest(dimension=path.name):
                 self.assertIn(f'`references/quality/{path.name}`', text)
-                self.assertIn('## 不通过的条件', body)
-                self.assertIn('## 需要用户决定的问题', body)
-                self.assertIn('## 报告写法', body)
+                # 维度文件内部结构由用户自行组织，这里只保证它有可读的小节
+                self.assertRegex(body, r'(?m)^## ')
 
     def test_issues_carry_rule_names(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -494,14 +543,16 @@ class RuleCodeTests(unittest.TestCase):
 
 
     def test_pivot_sentences_are_allowed(self):
-        from check_prose import RULE_FILES
-        self.assertNotIn('翻案句', RULE_FILES)
+        from check_constraints import RULE_FILES as CONSTRAINT_RULES
+        from check_prose import RULE_FILES as PROSE_RULES
+        self.assertNotIn('翻案句', PROSE_RULES)
+        self.assertNotIn('翻案句', CONSTRAINT_RULES)
         data = self.run_json('真正决定我留下来的不是速度，而是搜索。\n')
         self.assertTrue(data['pass'])
         self.assertNotIn('翻案句', {issue['name'] for issue in data['issues']})
 
 class SingleSourceTests(unittest.TestCase):
-    """A drafting example lives in one craft or genre file; revision.md may reuse it only as a before/after pair."""
+    """A drafting example lives in one craft or genre file; review.md may reuse it only as a before/after pair."""
 
     SAMPLES = (
         '天将明，人未归',

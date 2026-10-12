@@ -2,7 +2,7 @@
 
 本文件只管"谁在说话"的声音身份，也就是自定义风格和样本提取。写作风格跨平台、跨媒介不变；发布形态约束见 [platforms/](platforms/)。风格只调整语域、立场、节奏、标志手法和用词，不能放松这些底线。
 
-风格参数与 SKILL.md「##成稿绝对不能出现」冲突时，以该节禁令为准。`words_to_keep`、`favorite_moves`、`preferred_opening` 里出现该节覆盖的词语和句式时，一律不执行。
+风格参数与 `references/modes/prose.md` 的散文语体规范冲突时，以 `prose.md` 为准。`words_to_keep`、`favorite_moves`、`preferred_opening` 里出现违背该语体规范的词语和句式时，一律不执行。
 
 ## 写作风格系统
 
@@ -29,7 +29,6 @@
 - `words_to_avoid` 与 EXTEND.md 全局 `avoid_words` 取并集生效
 - `compliance_guardrails` 是可选的独立内容边界，不是声音参数；可放在 `custom_style` 中作为回退，优先放在账号级。仅使用 resolver 已解析的顶层清单，执行规则见 `references/publish/overview.md`「合规红线」，不要重复写进风格描述
 - `preferred_opening` 是偏好而非强制——内容需要时可选其他开头方式。有平台时同时参考形态文件的开篇钩子。`contradiction` 是把两件对不上的事实摆在一起
-- `ending_style` 服从 SKILL.md「动笔前先找到说话位置」定下的结尾落点
 - 实操细节、现实质疑、不确定性承认、冷幽默（若风格允许）在自然位置出现，不当清单逐项塞入
 - Never 在风格定义里混入平台约束（段落字数、emoji 策略）或媒介约束（叙事结构、开篇钩子）——那属于 [platforms/](platforms/)
 

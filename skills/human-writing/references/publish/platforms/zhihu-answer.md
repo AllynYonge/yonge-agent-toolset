@@ -6,6 +6,8 @@ name: 知乎回答
 
 # 知乎回答
 
+本形态的读取集合：起草时除本文件外，读 `references/modes/prose.md`，并按需读 `references/craft/hooks.md`、`references/craft/structure.md`、`references/craft/material.md`。
+
 先接住题目。答案简单就直接说，随后讲经验、条件和例外。答案复杂就从最容易被忽略的一处进入。读者问的是“为什么”，正文就尽早给出一种解释。读者问的是“什么体验”，正文要有经历、观察或明确说明自己从哪里知道。
 
 它的动力来自“为什么”和“你怎么知道”，不是来自标题党悬念。

@@ -7,8 +7,8 @@ Two roles live here on purpose:
   EXTEND.md, resolves only the requested active profile(s), and prints the
   minimal JSON needed for writing, rewriting, analysis, or review.
 * Library: the only EXTEND.md config layer. It owns YAML parsing, account
-  detection and constraint resolution. `check_prose.py` imports it instead of
-  resolving config a second time.
+  detection and constraint resolution. `check_constraints.py` imports it instead
+  of resolving config a second time.
 
 The YAML reader is deliberately dependency-free and supports only the subset of
 YAML used by EXTEND.md.
@@ -232,7 +232,7 @@ def resolve_constraints(
     profile: Optional[str],
     explicit_length: Optional[str],
 ) -> Dict[str, Any]:
-    """Resolve the constraints `check_prose.py` enforces on a finished draft.
+    """Resolve the constraints `check_constraints.py` enforces on a finished draft.
 
     Reuses `resolve_effective_config` and `load_style` so a profile can never
     resolve one way here and another way in the CLI output.
@@ -434,7 +434,6 @@ def resolve_output_dir(workspace_dir: str, value: Any) -> Optional[str]:
 
 
 def build_profile_result(
-    skill_root: str,
     extend_path: Optional[str],
     profile_name: Optional[str],
     config: Dict[str, Any],
@@ -478,7 +477,6 @@ def build_profile_result(
 
 def resolve_preferences(
     workspace_dir: str,
-    skill_root: str,
     requested_profiles: List[str],
 ) -> Dict[str, Any]:
     extend_path, scope = find_extend_path(workspace_dir)
@@ -492,7 +490,7 @@ def resolve_preferences(
     profiles: Dict[str, Dict[str, Any]] = {}
 
     for profile_name in profile_names:
-        result = build_profile_result(skill_root, extend_path, profile_name, config, workspace_dir)
+        result = build_profile_result(extend_path, profile_name, config, workspace_dir)
         output_key = result.get("active_profile") or "__default__"
         profiles[str(output_key)] = result
 
@@ -516,11 +514,6 @@ def main() -> int:
         help="Workspace directory. Defaults to current working directory.",
     )
     parser.add_argument(
-        "--skill-root",
-        default=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        help="human-writing skill root path.",
-    )
-    parser.add_argument(
         "--profile",
         help="Profile name, or multiple names separated by '|', e.g. profile1|profile2.",
     )
@@ -535,7 +528,6 @@ def main() -> int:
         requested_profiles = split_profiles(args.profile)
         resolved = resolve_preferences(
             workspace_dir=os.path.abspath(args.workspace_dir),
-            skill_root=os.path.abspath(args.skill_root),
             requested_profiles=requested_profiles,
         )
         if args.list_profiles:

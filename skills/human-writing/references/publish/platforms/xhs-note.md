@@ -6,7 +6,9 @@ name: 小红书笔记
 
 # 小红书笔记（xhs-note）
 
-本文件定义"小红书 × 短图文笔记"这一发布形态的完整约束——平台容器（在哪里说话）+ 媒介载体（用什么载体说话）。声音身份见 `references/publish/style.md`。成稿仍受 SKILL.md「成稿绝对不能出现」约束，本文件的示例句也不例外。
+本形态的读取集合：起草时除本文件外，读 `references/modes/prose.md`，并按需读 `references/craft/hooks.md`、`references/craft/structure.md`、`references/craft/material.md`。
+
+本文件定义"小红书 × 短图文笔记"这一发布形态的完整约束——平台容器（在哪里说话）+ 媒介载体（用什么载体说话）。声音身份见 `references/publish/style.md`。成稿仍受 `references/modes/prose.md` 的语体规范约束，本文件的示例句也不例外。
 
 ---
 
@@ -53,7 +55,7 @@ name: 小红书笔记
 第一句就要抓住人，用具体场景或强共鸣切入：
 
 - 适合：场景切入（"上周我买错了第二台加湿器。"）、问题切入（"如果你也是一到晚上就睡不着，先看看卧室温度。"）、对比切入（"同样三百块，A 用了半年，B 用了一个月就漏水。"）
-- 示例句同样遵守 SKILL.md「成稿绝对不能出现」
+- 示例句同样遵守 `references/modes/prose.md` 的语体规范
 - 不适合：百科式解释、抽象概念堆砌、长篇铺垫
 
 ## 七、篇幅特性

@@ -182,9 +182,7 @@ length: auto       # 根据素材量和平台自动判断（默认）
 **行为规则**：
 - 用户本次请求的显式长度指令（"写短一点"、"2000字左右"）优先于此配置
 - 超过上限判失败，必须删到范围内；低于下限只给提醒，不要求补字，交稿时说明实际字数
-- 长度服从材料。素材量与目标长度严重不匹配时缩短或追问，不强行填充
 - 改写模式下目标长度明显短于原文时，先确认用户意图是精简还是截取
-- 创建/改写完成后由主代理运行 `scripts/check_prose.py {constraint_check_args}` 确定性检查实际字数，避免只靠模型估算
 
 ### output_dir
 
@@ -247,7 +245,7 @@ custom_style:
 - 所有值用自然语言描述——风格是连续谱，不是离散枚举
 - `words_to_avoid` 与全局、账号 `avoid_words` 取并集生效
 - `preferred_opening` 是偏好而非强制——内容需要时可选其他开头方式
-- `words_to_keep`、`favorite_moves` 里出现 SKILL.md「成稿绝对不能出现」覆盖的词和句式时，一律不执行
+- `words_to_keep`、`favorite_moves` 里出现违背 `references/modes/prose.md` 语体规范的词和句式时，一律不执行
 - 不要在风格定义里混入平台约束（段落字数、emoji 策略）或媒介约束（叙事结构、开篇钩子）
 
 可在 `custom_style` 中放置 `compliance_guardrails` 作为回退清单；它不是声音参数，优先放在账号级。不要同时复制到 `stance`、`description` 等字段；具体行为见下一节。
@@ -277,7 +275,7 @@ wechat-living:
 **执行与检查**：
 
 - 执行契约见 `references/publish/overview.md`「合规红线」：写作前核对，成稿后逐条审核，不因风格、传播效果或篇幅要求放宽边界。
-- `check_prose.py` 的配置检查只确定性检查字数和规避词，不判断这些规则的语义；脚本通过不代表合规通过。需要逐字匹配的词仍放在 `avoid_words` / `words_to_avoid`。
+- `check_constraints.py` 的配置检查只确定性检查字数和规避词，不判断这些规则的语义；脚本通过不代表合规通过。需要逐字匹配的词仍放在 `avoid_words` / `words_to_avoid`。
 - 审核任务须收到完整清单并逐条返回结论、原文证据或核实缺口。配置为空时写明未配置额外规则，不宣称已通过全部法律或平台审核。
 
 ### avoid_words
@@ -288,9 +286,9 @@ wechat-living:
 
 账号写 `avoid_words: []` 表示本账号不额外增加规避词，全局词继续生效。
 
-创建和改写完成后，主代理运行 `scripts/check_prose.py {constraint_check_args}` 确定性扫描最终正文。规避词部分只检查 EXTEND.md、active 账号和 custom_style 中可逐字匹配的词；结构、句法和语气层面的 AI 痕迹由同一脚本的硬禁令与形状检查处理。
+`scripts/check_constraints.py` 的规避词检查只覆盖 EXTEND.md、active 账号和 custom_style 中可逐字匹配的词；结构、句法和语气层面的 AI 痕迹由 `scripts/check_prose.py` 的形状检查提示。
 
-账号规避词来自用户配置，不属于技能内置的硬禁词表，不受 SKILL.md「成稿绝对不能出现」中“检查脚本不得自行增加未写明的硬禁词”的约束。命中 `avoid_words` 或 `custom_style.words_to_avoid` 时，先按硬约束修复；只有当修复会删减事实或改变立场时，才进入待确认清单。
+账号规避词来自用户配置，独立于通用散文语体规范。命中 `avoid_words` 或 `custom_style.words_to_avoid` 时，先按硬约束修复；只有当修复会删减事实或改变立场时，才进入待确认清单。
 
 ### default_profile
 
