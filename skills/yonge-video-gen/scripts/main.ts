@@ -90,7 +90,7 @@ function printUsage(): void {
 
 配置与凭证加载优先级:
   CLI 参数 > EXTEND.md > 环境变量 > <cwd>/.yonge/.yonge-skills/.env > ~/.yonge/.yonge-skills/.env > 内置默认值
-  偏好写在 .yonge/.yonge-skills/yonge-video-gen/EXTEND.md（项目级优先，命中第一个就停）
+  偏好写在 .yonge/.yonge-skills/.yonge-video-gen/EXTEND.md（项目级优先，命中第一个就停）
   密钥只放 .env，不写进 EXTEND.md。方舟 AK/SK 与腾讯 COS 凭证同放（ARK_ACCESS_KEY/ARK_SECRET_KEY/TENCENT_COS_*）
 
 环境变量:

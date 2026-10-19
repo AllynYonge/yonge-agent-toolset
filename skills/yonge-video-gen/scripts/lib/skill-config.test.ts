@@ -79,9 +79,7 @@ batch:
   });
 
   test.each([
-    ["数组", "---\nlist:\n  - a\n---\n", "不支持数组"],
     ["flow 映射", "---\nmodel: {ark: x}\n---\n", "flow"],
-    ["flow 数组", "---\nitems: [1, 2]\n---\n", "flow"],
     ["多行字符串", "---\nnote: |\n---\n", "多行"],
     ["Tab 缩进", "---\nbatch:\n\tmax_workers: 2\n---\n", "Tab"],
     ["缩进不一致", "---\nbatch:\n    a: 1\n  b: 2\n---\n", "缩进不一致"],
@@ -92,13 +90,36 @@ batch:
     expect(() => parseExtend(content, "/tmp/EXTEND.md")).toThrow(message);
   });
 
+  test("列表：逐行 - item 与行内 [a, b] 都支持", () => {
+    const config = parseExtend(`---
+version: 1
+avoid_words:
+  - 赋能
+  - "含逗号, 与冒号: 的规则"
+rules: [a, b, "c, d"]
+empty: []
+nested:
+  words:
+    - x
+---
+`);
+    expect(config.avoid_words).toEqual(["赋能", "含逗号, 与冒号: 的规则"]);
+    expect(config.rules).toEqual(["a", "b", "c, d"]);
+    expect(config.empty).toEqual([]);
+    expect(config.nested).toEqual({ words: ["x"] });
+  });
+
+  test("列表项写成 - key: value 时按单键映射解析", () => {
+    expect(parseExtend("---\nitems:\n  - rule: text\n---\n").items).toEqual([{ rule: "text" }]);
+  });
+
   test("错误信息带文件路径与行号", () => {
     try {
-      parseExtend("---\nversion: 1\nlist:\n  - a\n---\n", "/tmp/EXTEND.md");
+      parseExtend("---\nversion: 1\nmodel: {ark: x}\n---\n", "/tmp/EXTEND.md");
       throw new Error("应当报错");
     } catch (error) {
       expect(error).toBeInstanceOf(ConfigError);
-      expect((error as ConfigError).message).toContain("/tmp/EXTEND.md:4");
+      expect((error as ConfigError).message).toContain("/tmp/EXTEND.md:3");
     }
   });
 });

@@ -161,8 +161,8 @@ batch:
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, content);
     };
-    write(path.join(cwd, ".yonge/.yonge-skills/yonge-video-gen/EXTEND.md"), "---\nversion: 1\ndefault_resolution: 1080p\n---\n");
-    write(path.join(home, ".yonge/.yonge-skills/yonge-video-gen/EXTEND.md"), "---\nversion: 1\ndefault_resolution: 480p\n---\n");
+    write(path.join(cwd, ".yonge/.yonge-skills/.yonge-video-gen/EXTEND.md"), "---\nversion: 1\ndefault_resolution: 1080p\n---\n");
+    write(path.join(home, ".yonge/.yonge-skills/.yonge-video-gen/EXTEND.md"), "---\nversion: 1\ndefault_resolution: 480p\n---\n");
     write(path.join(cwd, ".yonge/.yonge-skills/.env"), "YVG_TEST_SHARED=project\n");
     write(path.join(home, ".yonge/.yonge-skills/.env"), "YVG_TEST_SHARED=user\nYVG_TEST_PROCESS=user\n");
     process.env.YVG_TEST_PROCESS = "process";
@@ -179,7 +179,7 @@ batch:
 
   test("loadConfig：密钥写进 EXTEND.md 时报错", () => {
     const base = fs.mkdtempSync(path.join(os.tmpdir(), "yvg-config-"));
-    const file = path.join(base, "home/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md");
+    const file = path.join(base, "home/.yonge/.yonge-skills/.yonge-video-gen/EXTEND.md");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, "---\nversion: 1\nark_api_key: abc\n---\n");
     try {

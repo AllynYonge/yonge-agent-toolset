@@ -64,8 +64,8 @@ ${BUN_X} {baseDir}/scripts/lib/skill-config.ts --skill yonge-video-gen
 
 **Q4 保存位置**（放在最后一问）
 
-- 用户级（推荐）— `~/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md`，所有项目共用
-- 项目级 — `<cwd>/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md`，只对当前项目生效
+- 用户级（推荐）— `~/.yonge/.yonge-skills/.yonge-video-gen/EXTEND.md`，所有项目共用
+- 项目级 — `<cwd>/.yonge/.yonge-skills/.yonge-video-gen/EXTEND.md`，只对当前项目生效
 
 时长、音频、水印、模型不在首次设置里问，使用默认值（5 秒、生成音频、不打水印、内置默认模型），在 A4 里告诉用户。它们改起来成本低，用命令行参数临时覆盖或之后改 EXTEND.md 都可以。模型列表会随方舟更新而变化，写死反而容易过期。
 

@@ -26,7 +26,7 @@ export const EXTEND_FILE = "EXTEND.md";
 export const ENV_FILE = ".env";
 
 export type Scalar = string | number | boolean | null;
-export type ConfigValue = Scalar | ConfigMap;
+export type ConfigValue = Scalar | ConfigMap | ConfigValue[];
 export interface ConfigMap {
   [key: string]: ConfigValue;
 }
@@ -121,11 +121,13 @@ export function findExtendFile(skill: string, options: LocateOptions = {}): Conf
 /**
  * 解析 EXTEND.md 的 front matter。支持的写法：
  *   - 多层嵌套映射（缩进只能用空格，同一层缩进必须一致）
+ *   - 列表：逐行 `- item`，或行内 `[a, b]`（空列表写 `[]`）
  *   - 标量：字符串（可带单/双引号）、整数/小数、true/false、null/~/空值
  *   - 整行注释与行内注释（未加引号的值里，空格后的 # 起算注释；值本身以 # 开头或含「空格 + #」时必须加引号）
  * 不支持、遇到即报错（不会静默丢弃）：
- *   - 数组（`- item`）、flow 写法（`{a: 1}` / `[1, 2]`）、多行字符串（`|` / `>`）、锚点与别名（`&` / `*`）
- *   - Tab 缩进、重复键、缺少 front matter
+ *   - flow 映射（`{a: 1}`）、多行字符串（`|` / `>`）、锚点与别名（`&` / `*`）
+ *   - Tab 缩进、同层缩进不一致、重复键、缺少 front matter
+ * 列表项写成 `- key: value` 时按单键映射解析，让类型错误留到语义层报出。
  */
 export function parseExtend(content: string, filePath = EXTEND_FILE): ConfigMap {
   const lines = content.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n");
@@ -139,64 +141,149 @@ export function parseExtend(content: string, filePath = EXTEND_FILE): ConfigMap 
   return parseYamlSubset(lines.slice(1, end), 2, filePath);
 }
 
-interface Frame {
+interface Line {
   indent: number;
-  map: ConfigMap;
+  text: string;
+  lineNo: number;
 }
 
-interface Pending {
-  map: ConfigMap;
-  key: string;
-  indent: number;
+const KEY_LINE = /^([A-Za-z0-9_-]+)\s*:(?:\s+(.*)|)$/;
+
+function isListItem(text: string): boolean {
+  return text === "-" || text.startsWith("- ");
 }
 
-function parseYamlSubset(lines: string[], firstLineNo: number, filePath: string): ConfigMap {
-  const root: ConfigMap = {};
-  const stack: Frame[] = [{ indent: 0, map: root }];
-  let pending: Pending | null = null;
+function isQuoted(text: string): boolean {
+  return /^"|^'/.test(text);
+}
 
-  lines.forEach((line, offset) => {
-    const lineNo = firstLineNo + offset;
+function prepareLines(raw: string[], firstLineNo: number, filePath: string): Line[] {
+  const lines: Line[] = [];
+  raw.forEach((line, offset) => {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith("#")) return;
-
     const leading = line.match(/^[ \t]*/)?.[0] ?? "";
-    if (leading.includes("\t")) throw new ConfigError("缩进只能用空格，不能用 Tab", filePath, lineNo);
-    const indent = leading.length;
-
-    if (trimmed === "-" || trimmed.startsWith("- ")) {
-      throw new ConfigError("不支持数组写法（- item）。请改成映射，或拆成多个字段", filePath, lineNo);
+    if (leading.includes("\t")) {
+      throw new ConfigError("缩进只能用空格，不能用 Tab", filePath, firstLineNo + offset);
     }
+    lines.push({ indent: leading.length, text: trimmed, lineNo: firstLineNo + offset });
+  });
+  return lines;
+}
 
-    // 键名不允许点号：点号用来表示嵌套路径（default_model.ark），允许了会产生歧义
-    const match = trimmed.match(/^([A-Za-z0-9_-]+)\s*:(?:\s+(.*)|)$/);
-    if (!match) throw new ConfigError(`无法识别的行：${trimmed}（应为 key: value）`, filePath, lineNo);
+function misaligned(line: Line, indent: number, filePath: string): ConfigError {
+  return new ConfigError(
+    `缩进不一致：本行缩进 ${line.indent} 个空格，同层应为 ${indent} 个`,
+    filePath,
+    line.lineNo,
+  );
+}
+
+/** 按缩进解析一个块：同一缩进下要么全是 `key: value`，要么全是 `- item`。 */
+function parseBlock(
+  lines: Line[],
+  start: number,
+  indent: number,
+  filePath: string,
+): { value: ConfigValue; next: number } {
+  const first = lines[start];
+  if (!first) return { value: {}, next: start };
+  if (first.indent !== indent) throw misaligned(first, indent, filePath);
+  return isListItem(first.text)
+    ? parseSequence(lines, start, indent, filePath)
+    : parseMapping(lines, start, indent, filePath);
+}
+
+function parseMapping(
+  lines: Line[],
+  start: number,
+  indent: number,
+  filePath: string,
+): { value: ConfigMap; next: number } {
+  const map: ConfigMap = {};
+  let index = start;
+  while (index < lines.length) {
+    const line = lines[index]!;
+    if (line.indent < indent) break;
+    if (line.indent > indent) throw misaligned(line, indent, filePath);
+    if (isListItem(line.text)) {
+      throw new ConfigError(`同一层不能混用映射与列表：${line.text}`, filePath, line.lineNo);
+    }
+    const match = line.text.match(KEY_LINE);
+    if (!match) throw new ConfigError(`无法识别的行：${line.text}（应为 key: value）`, filePath, line.lineNo);
     const key = match[1]!;
     const rawValue = match[2] ?? "";
-
-    // 上一行是空值的键：本行缩进更深则它是父级映射，否则它就是 null
-    if (pending && indent > pending.indent) {
-      const child: ConfigMap = {};
-      pending.map[pending.key] = child;
-      stack.push({ indent, map: child });
+    if (Object.prototype.hasOwnProperty.call(map, key)) {
+      throw new ConfigError(`重复的键：${key}`, filePath, line.lineNo);
     }
-    pending = null;
-
-    while (stack.length > 1 && indent < stack[stack.length - 1]!.indent) stack.pop();
-    const frame = stack[stack.length - 1]!;
-    if (indent !== frame.indent) {
-      throw new ConfigError(`缩进不一致：本行缩进 ${indent} 个空格，同层应为 ${frame.indent} 个`, filePath, lineNo);
+    const child = lines[index + 1];
+    const blank = stripComment(rawValue) === "";
+    if (blank && child !== undefined && child.indent > indent) {
+      const parsed = parseBlock(lines, index + 1, child.indent, filePath);
+      map[key] = parsed.value;
+      index = parsed.next;
+      continue;
     }
-    if (Object.prototype.hasOwnProperty.call(frame.map, key)) {
-      throw new ConfigError(`重复的键：${key}`, filePath, lineNo);
+    map[key] = blank ? null : parseScalar(rawValue, filePath, line.lineNo);
+    index += 1;
+  }
+  return { value: map, next: index };
+}
+
+function parseSequence(
+  lines: Line[],
+  start: number,
+  indent: number,
+  filePath: string,
+): { value: ConfigValue[]; next: number } {
+  const items: ConfigValue[] = [];
+  let index = start;
+  while (index < lines.length) {
+    const line = lines[index]!;
+    if (line.indent < indent) break;
+    if (line.indent > indent) throw misaligned(line, indent, filePath);
+    if (!isListItem(line.text)) {
+      throw new ConfigError(`同一个列表只能放列表项：${line.text}`, filePath, line.lineNo);
     }
+    const body = line.text.slice(1).trim();
+    const child = lines[index + 1];
+    const blank = stripComment(body) === "";
+    if (blank && child !== undefined && child.indent > indent) {
+      const parsed = parseBlock(lines, index + 1, child.indent, filePath);
+      items.push(parsed.value);
+      index = parsed.next;
+      continue;
+    }
+    if (blank) {
+      items.push(null);
+      index += 1;
+      continue;
+    }
+    // `- key: value` 当成单键映射，与旧解析器一致，让类型错误在语义层报出
+    const mapping = isQuoted(body) ? null : body.match(KEY_LINE);
+    if (mapping) {
+      items.push({ [mapping[1]!]: parseScalar(mapping[2] ?? "", filePath, line.lineNo) });
+      index += 1;
+      continue;
+    }
+    items.push(parseScalar(body, filePath, line.lineNo));
+    index += 1;
+  }
+  return { value: items, next: index };
+}
 
-    const value = parseScalar(rawValue, filePath, lineNo);
-    frame.map[key] = value;
-    if (value === null && stripComment(rawValue) === "") pending = { map: frame.map, key, indent };
-  });
-
-  return root;
+function parseYamlSubset(raw: string[], firstLineNo: number, filePath: string): ConfigMap {
+  const lines = prepareLines(raw, firstLineNo, filePath);
+  if (!lines.length) return {};
+  const parsed = parseBlock(lines, 0, lines[0]!.indent, filePath);
+  if (parsed.next < lines.length) {
+    const rest = lines[parsed.next]!;
+    throw new ConfigError(`无法识别的行：${rest.text}`, filePath, rest.lineNo);
+  }
+  if (parsed.value === null || Array.isArray(parsed.value) || typeof parsed.value !== "object") {
+    throw new ConfigError("配置根节点必须是映射", filePath, lines[0]!.lineNo);
+  }
+  return parsed.value as ConfigMap;
 }
 
 function stripComment(raw: string): string {
@@ -205,7 +292,7 @@ function stripComment(raw: string): string {
   return value.replace(/\s+#.*$/, "").trim();
 }
 
-function parseScalar(raw: string, filePath: string, lineNo: number): Scalar {
+function parseScalar(raw: string, filePath: string, lineNo: number): Scalar | ConfigValue[] {
   const value = raw.trim();
 
   const double = value.match(/^"((?:[^"\\]|\\.)*)"\s*(?:#.*)?$/);
@@ -214,7 +301,11 @@ function parseScalar(raw: string, filePath: string, lineNo: number): Scalar {
   if (single) return single[1]!.replace(/''/g, "'");
 
   const bare = stripComment(value);
-  if (/^[{[]/.test(bare)) throw new ConfigError("不支持 flow 写法（{...} / [...]），请改成逐行缩进的映射", filePath, lineNo);
+  if (/^\[/.test(bare)) {
+    if (!/\]$/.test(bare)) throw new ConfigError("行内数组缺少结尾的 ]", filePath, lineNo);
+    return splitInlineArray(bare.slice(1, -1)).map((item) => parseScalar(item, filePath, lineNo));
+  }
+  if (/^\{/.test(bare)) throw new ConfigError("不支持 flow 映射（{...}），请改成逐行缩进的映射", filePath, lineNo);
   if (/^[|>]/.test(bare)) throw new ConfigError("不支持多行字符串（| / >），请写成单行", filePath, lineNo);
   if (/^[&*]/.test(bare)) throw new ConfigError("不支持锚点与别名（& / *）", filePath, lineNo);
 
@@ -223,6 +314,34 @@ function parseScalar(raw: string, filePath: string, lineNo: number): Scalar {
   if (bare.toLowerCase() === "false") return false;
   if (/^-?\d+(\.\d+)?$/.test(bare)) return Number(bare);
   return bare;
+}
+
+/** 行内数组按逗号切分，引号里的逗号不算分隔符。 */
+function splitInlineArray(body: string): string[] {
+  if (!body.trim()) return [];
+  const parts: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  for (const char of body) {
+    if (quote) {
+      if (char === quote) quote = null;
+      current += char;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === ",") {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  parts.push(current.trim());
+  return parts.filter((part) => part !== "");
 }
 
 // ---------------------------------------------------------------------------
@@ -236,13 +355,15 @@ export function isSecretKey(key: string): boolean {
   return SECRET_KEY_PATTERN.test(key);
 }
 
-/** 把嵌套映射展开成「点号路径 → 叶子值」。空映射本身算一个叶子。 */
-export function flattenConfig(config: ConfigMap, prefix = ""): Array<[string, Scalar | ConfigMap]> {
-  const entries: Array<[string, Scalar | ConfigMap]> = [];
+/** 把嵌套映射展开成「点号路径 → 叶子值」。列表与空映射本身算叶子。 */
+export function flattenConfig(config: ConfigMap, prefix = ""): Array<[string, ConfigValue]> {
+  const entries: Array<[string, ConfigValue]> = [];
   for (const [key, value] of Object.entries(config)) {
     const fullKey = prefix ? `${prefix}.${key}` : key;
-    if (value !== null && typeof value === "object" && Object.keys(value).length > 0) {
-      entries.push(...flattenConfig(value, fullKey));
+    const isBranch =
+      value !== null && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0;
+    if (isBranch) {
+      entries.push(...flattenConfig(value as ConfigMap, fullKey));
     } else {
       entries.push([fullKey, value]);
     }
@@ -305,11 +426,11 @@ export function loadSkillConfig(options: LoadConfigOptions): LoadConfigResult {
   return { config, source, warnings };
 }
 
-/** 按点号路径读取配置值，不存在时返回 undefined。 */
+/** 按点号路径读取配置值，不存在时返回 undefined。列表不参与点号取值。 */
 export function getConfigValue(config: ConfigMap, keyPath: string): ConfigValue | undefined {
   let current: ConfigValue | undefined = config;
   for (const part of keyPath.split(".")) {
-    if (current === null || typeof current !== "object") return undefined;
+    if (current === null || typeof current !== "object" || Array.isArray(current)) return undefined;
     current = current[part];
   }
   return current;

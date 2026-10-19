@@ -47,8 +47,8 @@ metadata:
 
 | 路径 | 作用域 |
 |------|--------|
-| `<cwd>/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md` | 项目 |
-| `~/.yonge/.yonge-skills/yonge-video-gen/EXTEND.md` | 用户 |
+| `<cwd>/.yonge/.yonge-skills/.yonge-video-gen/EXTEND.md` | 项目 |
+| `~/.yonge/.yonge-skills/.yonge-video-gen/EXTEND.md` | 用户 |
 
 - **找到** → 加载并应用。`default_provider` 为空且两个供应商的密钥都存在时，只补问供应商。
 - **没找到** → 走首次设置（`references/config/first-time-setup.md`），收集供应商 + 画幅 + 分辨率 + 时长 + 保存位置，写入 EXTEND.md 后继续原任务。

@@ -63,10 +63,11 @@ default_resolution: 1080p
 
 解析器只支持 YAML 的一个子集。以下写法会直接报错，不会被静默忽略：
 
-- 数组（`- item`）、flow 写法（`{a: 1}` / `[1, 2]`）、多行字符串（`|` / `>`）、锚点与别名
+- flow 映射（`{a: 1}`）、多行字符串（`|` / `>`）、锚点与别名
 - Tab 缩进、同层缩进不一致、重复的键
 - 密钥类字段（`*_api_key`、`*_secret`、`*_token`、`*_password` 等）
 - 字段类型不对（如 `default_duration: long`、`default_watermark: yes`）
+- 列表用逐行 `- item`，或行内 `[a, b]`；空列表写 `[]`。列表项写 `- key: value` 会被当成单键映射，需要字面冒号时加引号
 
 其它说明：
 
