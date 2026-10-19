@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: 创建新技能、修改并改进已有技能，并衡量技能表现。在用户要从零创建技能、定点编辑已有技能的局部内容、运行评测以测试技能、用方差分析做基准测试、优化技能 description 以提升触发准确率、精简冗长的技能文档、分析技能质量、在不改变行为的前提下重写重构技能以提升清晰度和可维护性、或为技能新增配置能力并按统一约定改造已有技能的配置（偏好文件、密钥、首次设置）时使用。支持快捷入口标志：--create、--edit、--eval、--improve、--rewrite、--simplify、--optimize-desc、--compare、--analyze、--config。
+description: 创建新技能、修改并改进已有技能，并衡量技能表现。在用户要从零创建技能、定点编辑已有技能的局部内容、运行评测以测试技能、用方差分析做基准测试、优化技能 description 以提升触发准确率、精简冗长的技能文档、分析技能质量、在不改变行为的前提下重写重构技能以提升清晰度和可维护性、为技能新增配置能力并按统一约定改造已有技能的配置（偏好文件、密钥、首次设置）、或为技能设计并按统一约定改造跨平台子代理委派时使用。支持快捷入口标志：--create、--edit、--eval、--improve、--rewrite、--simplify、--optimize-desc、--compare、--analyze、--config、--subagent。
 ---
 
 # 技能创建器
@@ -41,6 +41,7 @@ description: 创建新技能、修改并改进已有技能，并衡量技能表�
 - `--improve` — 根据评测反馈迭代改进技能行为与输出质量
 - `--compare` — 盲测对比两个技能版本，判断哪个更优
 - `--config` — 按统一配置约定给技能新增配置，或改造已有技能的配置
+- `--subagent` — 按统一子代理委派约定为技能新增子代理，或改造已有技能的子代理结构
 
 
 有标志时，跳过开场铺垫，直接进入对应章节。若缺少必要信息（路径、技能名等），仍要追问，但不要再从头走完整条工作流。
@@ -105,6 +106,7 @@ description: 创建新技能、修改并改进已有技能，并衡量技能表�
 5. 预期输出格式是什么？
 6. 是否应建立测试用例？（按技能类型建议：客观可验证的输出受益于测试用例；主观输出通常不需要）
 7. 技能是否需要持久化配置（用户偏好、凭据、多后端选择）？若需要，配置项有哪些入口，谁覆盖谁？（优先级链是事后补加成本最高的决策，此刻确认可避免返工。入口与优先级按统一配置约定确定，见 `## 统一配置（--config）`）
+8. 技能是否有需要独立上下文、多路并行探查或零历史包袱独立审查的环节？若有，按统一子代理约定设计主从受众边界与状态码闭环，见 `## 统一子代理委派（--subagent）`。
 
 ### 访谈与研究
 
@@ -143,6 +145,7 @@ skill-name/
 │   ├── YAML frontmatter (name, description required)
 │   └── Markdown instructions
 └── Bundled Resources (optional)
+    ├── agents/     - Isolated-context subagent definitions & prompts (loaded on demand)
     ├── scripts/    - Executable code for deterministic/repetitive tasks
     ├── references/ - Docs loaded into context as needed
     └── assets/     - Files used in output (templates, icons, fonts)
@@ -289,6 +292,16 @@ LLM 具备很强的理解和推理能力。当你为它提供一条规则或指�
 **MUST** 加载 [config-design.md](references/config-design.md)，按其八条技巧落地：三层承载位置、缺失即阻塞、优先级链单行声明、可变项建模成映射、清单单一事实来源、示例不含默认值、声明手写格式约束、多入口标注等价关系。
 
 目录、文件格式、密钥位置与读取脚本不要自行设计，按 `## 统一配置（--config）` 的约定执行。
+
+### 子代理委派设计（条件适用）
+
+**适用门槛**：目标技能存在以下任一情形时适用，三者皆无则跳过本节。
+
+- 探索、检索或长任务会产生大量中间噪音，需要隔离上下文防止污染主会话
+- 存在多个互不依赖、文件范围不重叠的子任务，可通过并行派发加速
+- 需要零历史包袱的独立审查者对初稿或代码改动做客观把关
+
+目录位置、主从受众边界、输入白黑名单与首行状态码闭环不要自行设计，按 `## 统一子代理委派（--subagent）` 的约定执行。
 
 ### 编写模式与示例
 
@@ -459,6 +472,26 @@ Output: feat(auth): implement JWT-based authentication
 
 ---
 
+## 统一子代理委派（--subagent）
+
+所有含子代理的技能共用一套跨平台（pi / Claude Code / Codex / OpenCode）约定：在 `SKILL.md` 中声明通用调度协议与轻量结构化调用卡，在 `agents/<role-id>.md` 中内聚该子代理的专属调度配置、上下文白黑名单、状态码闭环表与纯提示词块。
+
+核心约定：
+
+- 子代理文件统一放在技能目录的 `agents/<role-id>.md`；`agents/` 下只放运行时真实角色，**MUST NOT** 存放 `template.md` 等编写模板
+- 每个 `agents/<role-id>.md` 按受众分两层：第 1–3 节（调度配置、允许/禁止传递槽位、状态闭环表）仅服务主代理；第 4 节 ```` ```prompt ```` 代码块是发给子代理的全部提示词，**MUST NOT** 将第 1–3 节传给子代理
+- 首行状态码按决策性质二选一：产出型（`DONE` / `DONE_WITH_CONCERNS` / `NEEDS_CONTEXT` / `BLOCKED`）或判定型（`PASS` / `NEEDS_REVISION` / `NEEDS_CONTEXT` / `BLOCKED`）
+- 无法派发子代理时，主代理仅用「允许传递」的槽位按同一份 `prompt` 自执行并如实声明，**MUST NOT** 声称结果来自独立子代理
+
+两种用法：
+
+1. **给新技能加子代理** — 识别需要隔离上下文或并行的环节 → 判定产出型或判定型状态码 → 套用 `assets/subagent-kit/` 下的模板 → 按检查清单验证
+2. **改造已有技能的子代理** — 盘点 `SKILL.md` 委派点与现有子代理文件 → 对照约定逐项列差异，确认后再改 → 收拢通用调度协议、改写轻量调用卡与单文件自包含子代理、清理 `agents/template.md` → 按检查清单验证
+
+完整约定、文件清单、两种工作流和检查清单见 [subagent-paradigm.md](references/subagent-paradigm.md)。运行 --subagent 时阅读。
+
+---
+
 ## 盲测对比（--compare）
 
 若要更严格地比较两个技能版本（例如用户问「新版本是不是真的更好？」），有一套盲测对比系统。细节见 `agents/comparator.md` 与 `agents/analyzer.md`。基本思路：把两份输出交给独立智能体，不告诉它哪个是哪个，让它判断质量；再分析胜者为何胜。
@@ -521,11 +554,17 @@ references/ 目录还有补充文档：
 - `references/simplify.md` — 表达精简原则的详细精简技巧
 - `references/config-design.md` — 带持久化配置的技能，配置的分层、优先级与文档写法
 - `references/config-paradigm.md` — 统一配置约定、--config 工作流与检查清单
+- `references/subagent-paradigm.md` — 统一子代理委派约定、--subagent 工作流与检查清单
 
 assets/config-kit/ 目录是统一配置的模板与读取脚本：
 
 - `step0.md`、`preferences-schema.md`、`first-time-setup.md` — 目标技能配置文档的模板
 - `skill-config.ts`、`skill-config.test.ts` — 通用读取配置脚本及其测试，原样复制到目标技能的 `scripts/lib/`
+
+assets/subagent-kit/ 目录是统一子代理委派的模板套件：
+
+- `skill-dispatch.md` — 目标技能 `SKILL.md` 的「子代理通用调度协议」与「轻量委派调用卡」模板
+- `agent-role.md` — 目标技能 `agents/<role-id>.md` 的单文件自包含子代理模板
 
 ---
 
