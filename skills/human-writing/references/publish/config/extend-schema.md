@@ -1,6 +1,6 @@
 # EXTEND.md 模式定义
 
-本文件定义了 human-writing EXTEND.md 配置文件的所有支持字段。配置文件位于 `{workspace_dir}/.human-writing/EXTEND.md`（项目级）或 `$HOME/.human-writing/EXTEND.md`（用户级）。
+本文件定义了 human-writing EXTEND.md 配置文件的所有支持字段。配置文件位于 `{workspace_dir}/.yonge/.yonge-skills/human-writing/EXTEND.md`（项目级）或 `~/.yonge/.yonge-skills/human-writing/EXTEND.md`（用户级），查找顺序是项目级优先、命中即停。旧路径 `.human-writing/`、`.yonge-skills/.human-writing/` 与 `~/.human-writing/` 已不再读取，遇到旧配置请按新路径移动。
 
 用户同意保存时，才创建或写入这个文件。首个任务完成后会主动提议保存一次（SKILL.md「交稿」最后一段）。只写用户同意保存的字段。
 
@@ -57,7 +57,7 @@ wechat-personal:
 
 **继承规则**：账号内的字段覆盖全局同名字段；账号中未定义的字段回退到全局值，全局未定义则使用内置默认值。
 
-**账号 key 识别**：YAML 顶层 key 中，值为对象（dict）且不属于保留字的，视为账号定义。保留字由 `scripts/resolve_preferences.py` 的 `RESERVED_GLOBAL_KEYS` 定义，包含 `compliance_guardrails`；该字段不会被识别为账号。
+**账号 key 识别**：YAML 顶层 key 中，值为对象（dict）且不属于保留字的，视为账号定义。保留字由 `scripts/lib/preferences.ts` 的 `RESERVED_GLOBAL_KEYS` 定义，包含 `compliance_guardrails`；该字段不会被识别为账号。
 
 ## 字段定义
 
@@ -67,6 +67,7 @@ wechat-personal:
 
 | 字段 | 类型 | 默认值 | 说明 |
 |-------|------|---------|------|
+| `version` | 整数 | 1 | 配置格式版本，由 config-kit 校验；缺省时按 1 处理并给出提醒 |
 | `default_profile` | 字符串 | （无） | 默认激活的账号名 |
 | `long_threshold` | 数字 | 3000 | 长内容流的字符数阈值 |
 | `output_dir` | 字符串 | （无） | 创建/改写完成后保存 Markdown 文章的目录 |
@@ -269,13 +270,13 @@ wechat-living:
 - 类型为非空字符串组成的列表；条目前后空白会被移除，顺序不变。
 - 字段缺省才继承；显式 `[]` 表示不使用下层清单，不会撤销系统规则或实际适用的法律、平台要求。
 - 本字段不使用通用的 `null` / `auto` 回退约定。被选中的值若为字符串、对象、数字、布尔值、`null` 或含空白/非字符串条目的列表，resolver 报错，不继续写作。
-- 使用两空格缩进的多行 YAML 列表，每条规则用引号包裹并写在单行。空清单写 `[]`，不要只留字段名；非空清单不使用行内数组、`|` / `>` 多行字符串，以兼容当前简易解析器。
+- 使用两空格缩进的多行 YAML 列表，每条规则用引号包裹并写在单行。空清单写 `[]`，不要只留字段名；行内数组 `[a, b]` 也能解析，但规则含逗号或冒号时必须加引号。`|` / `>` 多行字符串不支持。
 - 没有独立 CLI 参数或环境变量入口；本次请求新增的明确内容边界由主代理补入任务清单。若与已生效规则冲突，先确认取舍，不静默覆盖。
 
 **执行与检查**：
 
 - 执行契约见 `references/publish/overview.md`「合规红线」：写作前核对，成稿后逐条审核，不因风格、传播效果或篇幅要求放宽边界。
-- `check_constraints.py` 的配置检查只确定性检查字数和规避词，不判断这些规则的语义；脚本通过不代表合规通过。需要逐字匹配的词仍放在 `avoid_words` / `words_to_avoid`。
+- `check_constraints.ts` 的配置检查只确定性检查字数和规避词，不判断这些规则的语义；脚本通过不代表合规通过。需要逐字匹配的词仍放在 `avoid_words` / `words_to_avoid`。
 - 审核任务须收到完整清单并逐条返回结论、原文证据或核实缺口。配置为空时写明未配置额外规则，不宣称已通过全部法律或平台审核。
 
 ### avoid_words
@@ -286,7 +287,7 @@ wechat-living:
 
 账号写 `avoid_words: []` 表示本账号不额外增加规避词，全局词继续生效。
 
-`scripts/check_constraints.py` 的规避词检查只覆盖 EXTEND.md、active 账号和 custom_style 中可逐字匹配的词；结构、句法和语气层面的 AI 痕迹由 `scripts/check_prose.py` 的形状检查提示。
+`scripts/check_constraints.ts` 的规避词检查只覆盖 EXTEND.md、active 账号和 custom_style 中可逐字匹配的词；结构、句法和语气层面的 AI 痕迹由 `scripts/check_prose.ts` 的形状检查提示。
 
 账号规避词来自用户配置，独立于通用散文语体规范。命中 `avoid_words` 或 `custom_style.words_to_avoid` 时，先按硬约束修复；只有当修复会删减事实或改变立场时，才进入待确认清单。
 

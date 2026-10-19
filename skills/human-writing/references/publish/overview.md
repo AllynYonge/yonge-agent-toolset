@@ -17,7 +17,7 @@
 - **平台 × 媒介**（“在哪里说话 × 用什么载体说话”）：平台容器（分发机制、用户心智、内容规范、交互偏好）加媒介载体（叙事结构、开篇钩子、篇幅特性、起草侧重），每个发布形态一个数据文件。见 [platforms/](platforms/)。
 - **文件输出与多形态聚合**：`output_dir` 保存规则、草稿标记、同一内容的多个形态聚合到一个文件与就地追加规则。见 [output.md](output.md)。
 
-active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve_preferences.py` 返回，无需直接读取 EXTEND.md 或数据文件。
+active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve_preferences.ts` 返回，无需直接读取 EXTEND.md 或数据文件。
 
 ## 配置系统
 
@@ -29,8 +29,8 @@ active profile 的 `platform`、`medium`、`style` 等参数由 `scripts/resolve
 
 | 优先级 | 路径 | 作用域 |
 |----------|------|-------|
-| 1 | `{workspace_dir}/.human-writing/EXTEND.md` | 项目级 |
-| 2 | `$HOME/.human-writing/EXTEND.md` | 用户主目录级 |
+| 1 | `{workspace_dir}/.yonge/.yonge-skills/human-writing/EXTEND.md` | 项目级 |
+| 2 | `~/.yonge/.yonge-skills/human-writing/EXTEND.md` | 用户主目录级 |
 
 `{workspace_dir}` 是运行时占位符，代表当前工作目录的实际路径。
 

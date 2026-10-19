@@ -4,15 +4,15 @@
 
 默认适用于现代白话散文。特殊文体只执行客观边界与硬禁用项，其余服从具体文体规范。
 
-- [脚本检查（check_constraints.py）](#脚本检查check_constraintspy)
+- [脚本检查（check_constraints.ts）](#脚本检查check_constraintsts)
 - [内容合规红线审查](#内容合规红线审查)
 - [扫读排版与呈现](#扫读排版与呈现)
 
 ---
 
-## 脚本检查（check_constraints.py）
+## 脚本检查（check_constraints.ts）
 
-成稿先运行 `python3 scripts/check_constraints.py <稿件路径> [--profile/--extend/--length]` 做确定性检查。负责账号配置的篇幅与规避词：超出上限或命中规避词都是失败项，必须调整；字数低于下限只作提醒。
+成稿先运行 `bun scripts/check_constraints.ts <稿件路径> [--profile/--extend/--length]` 做确定性检查。负责账号配置的篇幅与规避词：超出上限或命中规避词都是失败项，必须调整；字数低于下限只作提醒。
 
 ---
 

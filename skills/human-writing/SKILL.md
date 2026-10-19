@@ -33,9 +33,9 @@ description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长�
 
 新写和改稿走同一条流程，第 2、3、5 步分新写和改稿两支。标着「有配置时」的内容，在没有账号配置、目标平台和风格时全部跳过。
 
-1. **读配置。** 工作目录或用户目录下存在 `.human-writing/EXTEND.md`，或者带了 `--profile` 参数时，运行下面的命令，只使用它返回的结果，不直接读取 EXTEND.md。否则跳过，合规清单按 `[]` 处理。账号、合规红线、`length` 和 `deep` 的用法见 `references/publish/overview.md`。
+1. **读配置。** 工作目录下的 `.yonge/.yonge-skills/human-writing/EXTEND.md` 或用户目录下的 `~/.yonge/.yonge-skills/human-writing/EXTEND.md` 存在时，或者带了 `--profile` 参数时，运行下面的命令，只使用它返回的结果，不直接读取 EXTEND.md。否则跳过，合规清单按 `[]` 处理。账号、合规红线、`length` 和 `deep` 的用法见 `references/publish/overview.md`。
    ```bash
-     python3 scripts/resolve_preferences.py \
+     bun scripts/resolve_preferences.ts \
        --workspace-dir "{workspace_dir}" \
        [--profile "<name>"]
    ```
@@ -48,7 +48,7 @@ description: 通用中文创作与改稿 Skill。用于知乎回答、论坛长�
    - 改稿：阅读原文，然后再委派子代理出 3 个选题方案。
    - 从分析模式带来的「选题交接信息」在这里进入，视为用户已明确指定的切入角度，直接使用，不派选题子代理。
 4. **定调。**
-   - 按下文「不同形式怎样写」对照表“读取”相关参考文件；
+   - 确定内容形式，然后按下文「不同形式怎样写」对照表“读取”相关参考文件；
    - 发布形态：按 `references/publish/overview.md`「平台与媒介检测」分别确定平台与媒介，合成后读取 `references/publish/platforms/{platform}-{medium}.md`。只读到近似形态时向用户说明。平台与媒介都判断不出时不套用平台形态。
 5. **动笔。** 起草初稿或执行改写。
    - 新写/改稿必须遵循 `references/modes/prose.md` 的正向创作规范。改稿按 `references/tasks/rewrite.md` 对应的 `--deep` 档位改写。

@@ -12,7 +12,7 @@
 
 文件名始终是 `{title}.md`，草稿态只标在文件内的分区标题上，不改文件名。
 
-`# {platform}-{medium}` 分区标题是文件编排标记，不是正文，`check_prose.py` 不对它报错。
+`# {platform}-{medium}` 分区标题是文件编排标记，不是正文，`check_prose.ts` 不对它报错。
 
 ## 分区命名规则
 

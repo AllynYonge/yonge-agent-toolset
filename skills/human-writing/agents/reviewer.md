@@ -212,7 +212,7 @@ flowchart TD
 
 ## 脚本检查
 
-按顺序运行两个脚本，解析各自的 JSON 输出：`scripts/check_prose.py [ARTICLE_PATH] --json` 查排比与节奏，`scripts/check_constraints.py [ARTICLE_PATH] [CONSTRAINT_CHECK_ARGS] --json` 查篇幅与规避词。脚本只把确定性命中的形状与边界问题报成失败项（level 为 fail），失败项必须清零才能 PASS；篇幅低于下限是唯一的警告项（level 为 warn），在所属维度里结合现有材料判断。每个问题都带规则名（如排比、篇幅、规避词），在报告中保留规则名。任一脚本执行失败时报告 `审核状态：ERROR`。
+按顺序运行两个脚本，解析各自的 JSON 输出：`bun scripts/check_prose.ts [ARTICLE_PATH] --json` 查排比与节奏，`bun scripts/check_constraints.ts [ARTICLE_PATH] [CONSTRAINT_CHECK_ARGS] --json` 查篇幅与规避词。脚本只把确定性命中的形状与边界问题报成失败项（level 为 fail），失败项必须清零才能 PASS；篇幅低于下限是唯一的警告项（level 为 warn），在所属维度里结合现有材料判断。每个问题都带规则名（如排比、篇幅、规避词），在报告中保留规则名。任一脚本执行失败时报告 `审核状态：ERROR`。
 
 ## 待审核文章
 

@@ -23,7 +23,7 @@
    > 4. 每个账号的定位、目标受众、做账号的目的是什么？（可选，后续也能补充）
    > 5. 要不要固定一种写作风格？给我一篇你觉得最像你风格的文章，我提取后内联到配置里；不提供就用默认写法
    > 6. 生成/改写后的文章要自动保存到哪个目录？（可选；以 `/` 开头为绝对路径，如 `/Users/me/articles`；否则为当前项目工作目录下的相对路径，如 `articles`）
-   > 7. 保存配置到哪里？（项目目录 `.human-writing/EXTEND.md` 还是用户目录 `~/.human-writing/EXTEND.md`）"
+   > 7. 保存配置到哪里？（项目目录 `.yonge/.yonge-skills/human-writing/EXTEND.md` 还是用户目录 `~/.yonge/.yonge-skills/human-writing/EXTEND.md`）"
 
 4. 根据回答生成 EXTEND.md。以下为三种典型形态的最小骨架，仅示意"存成什么样"；完整字段定义、类型与继承规则以 [extend-schema.md](extend-schema.md) 为权威源，需要照抄结构时读它，此处不复制。
 
@@ -31,6 +31,7 @@
 
 ```yaml
 ---
+version: 1
 wechat-tech:
   platform: wechat
   medium: article
@@ -48,6 +49,7 @@ wechat-tech:
 
 ```yaml
 ---
+version: 1
 wechat-tech:
   platform: wechat
   medium: article
@@ -66,6 +68,7 @@ wechat-tech:
 
 ```yaml
 ---
+version: 1
 default_profile: wechat-tech
 long_threshold: 3000
 output_dir: articles
