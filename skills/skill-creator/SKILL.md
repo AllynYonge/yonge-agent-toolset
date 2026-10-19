@@ -252,14 +252,10 @@ cloud-deploy/
 
 #### 重点解释性原则
 
-**阐明规则背后的理由**
+**阐明规则背后的理由**。LLM 具备很强的理解和推理能力。当你为它提供一条规则或指令时，如果同时说明背后的原因，它就能在遇到你未曾预见的情况时举一反三，做出符合原意的正确判断。相反，如果只给出一条缺乏上下文的指令，LLM 往往会机械地执行，一旦实际场景偏离你制定规则时的预设，指令就会失效。**建议：** 针对具有一定开放性的指令或规则，考虑附上其设计意图或背后的理由。
 
-LLM 具备很强的理解和推理能力。当你为它提供一条规则或指令时，如果同时说明背后的原因，它就能在遇到你未曾预见的情况时举一反三，做出符合原意的正确判断。相反，如果只给出一条缺乏上下文的指令，LLM 往往会机械地执行，一旦实际场景偏离你制定规则时的预设，指令就会失效。**建议：** 针对具有一定开放性的指令或规则，考虑附上其设计意图或背后的理由。
-
-**优先使用正向表述**
-
-在编写指令时，应优先明确说明"该做什么"，而非"不要做什么"。负向表述容易造成理解偏差，且无法有效指引行为方向。**负向表述仅在以下两种场景中使用：**
-- 封堵已经观察到的高频错误
+**优先使用正向表述**。在编写指令时，应优先明确说明"该做什么"，而非"不要做什么"。负向表述容易造成理解偏差，且无法有效指引行为方向。**负向表述仅在以下两种场景中使用：**
+- 规避已经观察到的高频错误
 - 在提示词的首尾位置强调硬性边界
 
 #### 术语一致性原则
@@ -289,9 +285,7 @@ LLM 具备很强的理解和推理能力。当你为它提供一条规则或指�
 
 配置一旦写错，症状往往是「用户配了但没生效」且无任何报错——这类静默失败的排查成本远高于配置本身的复杂度，所以配置的分层与优先级要在动笔前定好，而不是事后补。
 
-**MUST** 加载 [config-design.md](references/config-design.md)，按其八条技巧落地：三层承载位置、缺失即阻塞、优先级链单行声明、可变项建模成映射、清单单一事实来源、示例不含默认值、声明手写格式约束、多入口标注等价关系。
-
-目录、文件格式、密钥位置与读取脚本不要自行设计，按 `## 统一配置（--config）` 的约定执行。
+目录位置、文件格式、三层按需承载、缺失硬门禁、优先级链、可变项映射、密钥隔离与读取脚本不要自行设计，**MUST** 加载 [config-paradigm.md](references/paradigms/config-paradigm.md)，按 `## 统一配置（--config）` 的统一约定执行。
 
 ### 子代理委派设计（条件适用）
 
@@ -357,7 +351,7 @@ Output: feat(auth): implement JWT-based authentication
 
 结果放在与技能目录同级的 `<skill-name>-workspace/`。工作区内按迭代组织（`iteration-1/`、`iteration-2/` 等），每个测试用例再有自己的目录（`eval-0/`、`eval-1/` 等）。不要事先建齐——边做边建。
 
-详细的五步流程（拉起运行、起草断言、捕获计时、评分聚合、读取反馈）见 [eval-workflow.md](references/eval-workflow.md)。运行评测时阅读。
+详细的五步流程（拉起运行、起草断言、捕获计时、评分聚合、读取反馈）见 [eval.md](references/eval.md)。运行评测时阅读。
 
 ---
 
@@ -404,7 +398,7 @@ Output: feat(auth): implement JWT-based authentication
 | **--improve** | 技能的行为、输出质量、策略选择 | 用户明确要保留的业务逻辑 | 评测结果 + 用户对输出的反馈 |
 | **--rewrite** | 文档的结构、清晰度、一致性、可维护性 | 核心意图、功能集、约束、工作流逻辑 | 文档质量分析（对照本技能的编写原则） |
 
-参考 [rewrite-workflow.md](references/rewrite-workflow.md) 进行重构流程
+参考 [rewrite.md](references/rewrite.md) 进行重构流程
 
 ---
 
@@ -412,7 +406,7 @@ Output: feat(auth): implement JWT-based authentication
 
 专门处理技能内容的冗余与臃肿问题。当用户说"这个技能太长了""帮我精简一下""去掉废话"时，使用精简模式。
 
-**本质：精简是 `--rewrite` 只选"表达精简"维度的子集**，复用 rewrite 的「诊断 → 选择 → 执行 → 验证」骨架（见 [rewrite-workflow.md](references/rewrite-workflow.md)），仅在两点不同：
+**本质：精简是 `--rewrite` 只选"表达精简"维度的子集**，复用 rewrite 的「诊断 → 选择 → 执行 → 验证」骨架（见 [rewrite.md](references/rewrite.md)），仅在两点不同：
 
 1. **只跑表达精简**：诊断范围锁定表达精简原则，不涉及其余原则
 2. **换用四档策略**：把 rewrite 步骤 3 的维度勾选，替换为 simplify.md 的细粒度风险分级（保守 / 平衡 / 激进 / 自定义）
@@ -448,7 +442,7 @@ Output: feat(auth): implement JWT-based authentication
 - 不进入评测循环（那是 --improve 的事）
 - 自检仅作为质量护栏，不作为拒绝执行的理由
 
-详细的六步流程、追问策略、不满意回路、质量门禁自检方法和变更摘要格式见 [edit-workflow.md](references/edit-workflow.md)。运行 --edit 时阅读。
+详细的六步流程、追问策略、不满意回路、质量门禁自检方法和变更摘要格式见 [edit.md](references/edit.md)。运行 --edit 时阅读。
 
 ---
 
@@ -468,7 +462,7 @@ Output: feat(auth): implement JWT-based authentication
 1. **给新技能加配置** — 列出配置项并分类 → 确定门禁范围 → 套用 `assets/config-kit/` 下的模板 → 接入读取脚本 → 按检查清单验证
 2. **改造已有技能** — 盘点文档与代码中的全部配置入口 → 对照约定逐项列差异 → 展示差异，确认后再改 → 处理旧配置迁移 → 修改 → 按检查清单验证
 
-完整约定、文件清单、读取脚本用法、迁移规则和检查清单见 [config-paradigm.md](references/config-paradigm.md)。运行 --config 时阅读。
+完整约定、文件清单、读取脚本用法、迁移规则和检查清单见 [config-paradigm.md](references/paradigms/config-paradigm.md)。运行 --config 时阅读。
 
 ---
 
@@ -488,7 +482,7 @@ Output: feat(auth): implement JWT-based authentication
 1. **给新技能加子代理** — 识别需要隔离上下文或并行的环节 → 判定产出型或判定型状态码 → 套用 `assets/subagent-kit/` 下的模板 → 按检查清单验证
 2. **改造已有技能的子代理** — 盘点 `SKILL.md` 委派点与现有子代理文件 → 对照约定逐项列差异，确认后再改 → 收拢通用调度协议、改写轻量调用卡与单文件自包含子代理、清理 `agents/template.md` → 按检查清单验证
 
-完整约定、文件清单、两种工作流和检查清单见 [subagent-paradigm.md](references/subagent-paradigm.md)。运行 --subagent 时阅读。
+完整约定、文件清单、两种工作流和检查清单见 [subagent-paradigm.md](references/paradigms/subagent-paradigm.md)。运行 --subagent 时阅读。
 
 ---
 
@@ -504,7 +498,7 @@ Output: feat(auth): implement JWT-based authentication
 
 在决定是否重写、优化或改进技能之前，用户可能想先了解技能的现状、优劣势和改进空间。分析模式提供**只读、证据驱动**的质量评估。
 
-详细的分析维度、工作流和报告格式见 [analyze-workflow.md](references/analyze-workflow.md)。运行 --analyze/分析 时阅读。
+详细的分析维度、工作流和报告格式见 [analyze.md](references/analyze.md)。运行 --analyze/分析 时阅读。
 
 ---
 
@@ -545,16 +539,15 @@ agents/ 目录包含专用子智能体的指令。需要拉起相应子智能体
 references/ 目录还有补充文档：
 
 - `references/schemas.md` — evals.json、grading.json 等的 JSON 结构
-- `references/edit-workflow.md` — 定点编辑模式的六步详细流程与交互协议
-- `references/eval-workflow.md` — 评估测试技能的五步详细流程
+- `references/edit.md` — 定点编辑模式的六步详细流程与交互协议
+- `references/eval.md` — 评估测试技能的五步详细流程
 - `references/description-optimization.md` — description 优化的四步流程与触发机制
 - `references/environment-adapters.md` — Claude.ai 和 Cowork 环境的适配说明
-- `references/analyze-workflow.md` — 技能质量分析模式的详细方法论与诊断维度
-- `references/rewrite-workflow.md` — 技能文档重写模式的详细方法论与诊断维度
+- `references/analyze.md` — 技能质量分析模式的详细方法论与诊断维度
+- `references/rewrite.md` — 技能文档重写模式的详细方法论与诊断维度
 - `references/simplify.md` — 表达精简原则的详细精简技巧
-- `references/config-design.md` — 带持久化配置的技能，配置的分层、优先级与文档写法
-- `references/config-paradigm.md` — 统一配置约定、--config 工作流与检查清单
-- `references/subagent-paradigm.md` — 统一子代理委派约定、--subagent 工作流与检查清单
+- `references/paradigms/config-paradigm.md` — 统一配置约定（设计原则、格式约定、--config 统一工作流与检查清单）
+- `references/paradigms/subagent-paradigm.md` — 统一子代理委派约定、--subagent 工作流与检查清单
 
 assets/config-kit/ 目录是统一配置的模板与读取脚本：
 

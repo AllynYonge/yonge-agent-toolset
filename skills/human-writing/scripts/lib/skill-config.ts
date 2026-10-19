@@ -6,7 +6,7 @@
  * 用法：原样复制到目标技能的 scripts/lib/skill-config.ts，不要在目标技能里单独修改。
  *       需要改动时先改 skill-creator 里的这一份，再同步到各技能，避免各技能的读取规则悄悄分叉。
  *
- * 实现的约定（详见 skill-creator/references/config-paradigm.md）：
+ * 实现的约定（详见 skill-creator/references/paradigms/config-paradigm.md）：
  *   - 偏好文件：<cwd>/.yonge/.yonge-skills/<技能名>/EXTEND.md → ~/.yonge/.yonge-skills/<技能名>/EXTEND.md，命中第一个就停，不合并
  *   - 密钥文件：<cwd>/.yonge/.yonge-skills/.env 与 ~/.yonge/.yonge-skills/.env
  *   - 优先级：CLI 参数 > EXTEND.md > 进程环境变量 > 项目 .env > 用户 .env > 内置默认值

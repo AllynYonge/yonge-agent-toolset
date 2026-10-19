@@ -6,7 +6,7 @@
 
 精简的目标是让技能表达直达本质，抓住重点和关键信息，删除不必要的冗余说明，同时不能削减原有的技能能力。
 
-> 本文件是 [rewrite-workflow.md](rewrite-workflow.md)「针对性重写执行」中 **表达精简维度的展开**，以及 `--simplify` 入口所用的四档策略细节，不是一条独立工作流。诊断 → 选择 → 执行 → 验证的骨架仍以 rewrite-workflow.md 为准。
+> 本文件是 [rewrite.md](rewrite.md)「针对性重写执行」中 **表达精简维度的展开**，以及 `--simplify` 入口所用的四档策略细节，不是一条独立工作流。诊断 → 选择 → 执行 → 验证的骨架仍以 rewrite.md 为准。
 
 ## 精简三原则
 
@@ -54,7 +54,7 @@
 
 ### 专项：精简额外验证
 
-使用 [rewrite-workflow.md](rewrite-workflow.md)「基线验证和变更总结」中定义的标准基线验证流程，额外增加精简专项检查：
+使用 [rewrite.md](rewrite.md)「基线验证和变更总结」中定义的标准基线验证流程，额外增加精简专项检查：
 
 - [ ] 每个约束的边界条件是否仍可被 Claude 理解？
 - [ ] 删除的示例是否覆盖了独特场景（若是，需保留或改为一句话说明）？
@@ -112,7 +112,7 @@
 
 ## 输出规范
 
-输出格式复用 [rewrite-workflow.md](rewrite-workflow.md)「用户选择后」的完整结构，仅将标签 `<rewritten_skill>` / `<change_log>` 替换为 `<simplified_skill>` / `<simplification_log>`。若 rewrite 的输出结构变更，此处自动随之生效——不在此另存一份格式定义。
+输出格式复用 [rewrite.md](rewrite.md)「用户选择后」的完整结构，仅将标签 `<rewritten_skill>` / `<change_log>` 替换为 `<simplified_skill>` / `<simplification_log>`。若 rewrite 的输出结构变更，此处自动随之生效——不在此另存一份格式定义。
 
 ---
 
