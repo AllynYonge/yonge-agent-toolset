@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 import { realpathSync } from "node:fs";
-import { basename, relative } from "node:path";
+import { stat } from "node:fs/promises";
+import { basename, relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
 
-import { loadConfig, resolveSourcePath } from "./config.js";
+import { expandHome, loadConfig, resolveSourcePath } from "./config.js";
 import { linkBaseInstructions, linkMode, validateBaseInstructions } from "./linker.js";
 import { writeMcpServers } from "./mcp.js";
 import { isPlatform, type Platform } from "./platform.js";
@@ -13,7 +14,7 @@ import type { ModeConfig } from "./types.js";
 
 const HELP = `Usage:
   skill-linker list [--config <path>]
-  skill-linker link <mode...> [--platform <codex|claude|agents>] [--config <path>]
+  skill-linker link <mode...> [--platform <codex|claude|agents>] [--path <dir>] [--config <path>]
 `;
 
 export async function run(
@@ -27,6 +28,7 @@ export async function run(
       args: argv,
       options: {
         config: { type: "string", short: "c" },
+        path: { type: "string" },
         platform: { type: "string", short: "p", multiple: true },
       },
       allowPositionals: true,
@@ -40,10 +42,16 @@ export async function run(
       throw new CliUsageError("link accepts at most one --platform value");
     }
     const platformValue = platformValues?.[0];
+    const pathValue = typeof parsed.values.path === "string"
+      ? parsed.values.path
+      : undefined;
 
     if (parsed.positionals.length === 0) {
       if (platformValue !== undefined) {
         throw new CliUsageError("--platform requires the link command");
+      }
+      if (pathValue !== undefined) {
+        throw new CliUsageError("--path requires the link command");
       }
       stdout.write(HELP);
       return 0;
@@ -53,6 +61,10 @@ export async function run(
 
     if (command === "list" && platformValue !== undefined) {
       throw new CliUsageError("list does not accept --platform");
+    }
+
+    if (command === "list" && pathValue !== undefined) {
+      throw new CliUsageError("list does not accept --path");
     }
 
     const loaded = await loadConfig(configPath, cwd);
@@ -86,6 +98,7 @@ export async function run(
       const platforms: readonly Platform[] = platformValue === undefined
         ? ["codex", "claude", "agents"]
         : [platformValue];
+      const targetDirectory = await resolveTargetDirectory(pathValue, cwd);
       const modeConfig = mergeModeConfigs(
         positionals,
         loaded.config.modes,
@@ -94,21 +107,21 @@ export async function run(
       await validateBaseInstructions(
         modeConfig.baseInstruction,
         loaded.configDirectory,
-        cwd,
+        targetDirectory,
         platforms,
       );
       const linkResult = await linkMode(
         positionals.join(", "),
         modeConfig.skills,
         loaded.configDirectory,
-        cwd,
+        targetDirectory,
         platforms,
       );
-      const mcpResult = await writeMcpServers(modeConfig.mcpServers, cwd, platforms);
+      const mcpResult = await writeMcpServers(modeConfig.mcpServers, targetDirectory, platforms);
       const baseResult = await linkBaseInstructions(
         modeConfig.baseInstruction,
         loaded.configDirectory,
-        cwd,
+        targetDirectory,
         platforms,
       );
       for (const warning of [...linkResult.warnings, ...mcpResult.warnings, ...baseResult.warnings]) {
@@ -116,16 +129,16 @@ export async function run(
       }
       for (const link of linkResult.created) {
         const suffix = link.replaced ? " (replaced)" : "";
-        const destination = relative(cwd, link.destination) || ".";
+        const destination = relative(targetDirectory, link.destination) || ".";
         stdout.write(`LINK: ${destination} -> ${link.target}${suffix}\n`);
       }
       for (const server of mcpResult.written) {
-        const destination = relative(cwd, server.destination) || ".";
+        const destination = relative(targetDirectory, server.destination) || ".";
         stdout.write(`MCP: ${server.name} -> ${destination}\n`);
       }
       for (const instruction of baseResult.created) {
         const suffix = instruction.replaced ? " (replaced)" : "";
-        const destination = relative(cwd, instruction.destination) || ".";
+        const destination = relative(targetDirectory, instruction.destination) || ".";
         stdout.write(`BASE: ${destination} -> ${instruction.target}${suffix}\n`);
       }
       return 0;
@@ -137,6 +150,43 @@ export async function run(
     stderr.write(`ERROR: ${message}\n`);
     return 1;
   }
+}
+
+async function resolveTargetDirectory(
+  pathValue: string | undefined,
+  cwd: string,
+): Promise<string> {
+  if (pathValue === undefined) {
+    return cwd;
+  }
+
+  if (pathValue.trim().length === 0) {
+    throw new CliUsageError("--path requires a non-empty directory");
+  }
+
+  const candidate = resolve(cwd, expandHome(pathValue));
+  let candidateStats: Awaited<ReturnType<typeof stat>>;
+
+  try {
+    candidateStats = await stat(candidate);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new CliUsageError(`--path does not exist: ${candidate}`);
+    }
+
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new CliUsageError(`cannot inspect --path ${candidate} (${detail})`);
+  }
+
+  if (!candidateStats.isDirectory()) {
+    throw new CliUsageError(`--path is not a directory: ${candidate}`);
+  }
+
+  return candidate;
+}
+
+function isNodeError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error;
 }
 
 function mergeModeConfigs(

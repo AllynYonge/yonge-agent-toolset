@@ -62,9 +62,12 @@ npx @yonge/skill-linker list
 npx @yonge/skill-linker link dev --platform codex
 npx @yonge/skill-linker link dev research --platform codex
 npx @yonge/skill-linker link dev --config /path/to/linker.config.json
+npx @yonge/skill-linker link dev --path ../other-project
 ```
 
 The `--config` option overrides the default search for that command only.
+
+The `--path` option writes all SKILL links, MCP configurations, and base instruction links into the given directory instead of the current working directory. Relative values resolve against the current working directory, and `~` is expanded. The directory must already exist and be a directory; otherwise the command exits without making changes. Configuration lookup is not affected, so a global configuration keeps working from any directory. `--path` applies to `link` only.
 
 Supported platforms are `codex`, `claude`, and `agents`. Omitting `--platform` processes all three platforms.
 
@@ -78,7 +81,7 @@ The `link` command accepts one or more modes. Modes are merged from left to righ
 
 The `agents` platform targets the tool-agnostic `.agents/skills` directory and Pi's project MCP override `.pi/mcp.json`, which takes precedence over `.mcp.json`.
 
-Links are created in platform `skills` directories under the current working directory. Existing symlinks with the same name are replaced. Existing files and directories are left untouched and skipped silently. Invalid source paths and MCP definitions are skipped with a warning on stderr.
+Links are created in platform `skills` directories under the target directory: the current working directory unless `--path` is given. Existing symlinks with the same name are replaced. Existing files and directories are left untouched and skipped silently. Invalid source paths and MCP definitions are skipped with a warning on stderr.
 
 MCP configurations are merged by service name. Existing unrelated settings and MCP services are preserved; a configured service replaces an existing service with the same name. Environment variables and headers are written exactly as configured and are not expanded or printed.
 

@@ -516,3 +516,133 @@ describe("CLI platform handling", () => {
     );
   });
 });
+
+describe("CLI target directory handling", () => {
+  it("links into --path instead of the working directory", async () => {
+    const fixture = await makeFixture();
+    const target = join(fixture.root, "project");
+    await mkdir(target);
+    const stdout = new CaptureStream();
+    const stderr = new CaptureStream();
+
+    const exitCode = await run(
+      ["link", "dev", "--path", target, "--config", fixture.configPath],
+      fixture.cwd,
+      stdout,
+      stderr,
+    );
+
+    assert.equal(exitCode, 0);
+    assert.equal(stderr.text(), "");
+    assert.equal(
+      await realpath(join(target, ".codex", "skills", "browser")),
+      await realpath(fixture.source),
+    );
+    await assert.rejects(lstat(join(fixture.cwd, ".codex")), { code: "ENOENT" });
+    assert.match(stdout.text(), /LINK: \.codex\/skills\/browser/);
+  });
+
+  it("resolves a relative --path against the working directory", async () => {
+    const fixture = await makeFixture();
+    const target = join(fixture.cwd, "nested", "project");
+    await mkdir(target, { recursive: true });
+
+    const exitCode = await run(
+      ["link", "dev", "--path", "nested/project", "--platform", "codex", "--config", fixture.configPath],
+      fixture.cwd,
+      new CaptureStream(),
+      new CaptureStream(),
+    );
+
+    assert.equal(exitCode, 0);
+    assert.equal(
+      await realpath(join(target, ".codex", "skills", "browser")),
+      await realpath(fixture.source),
+    );
+  });
+
+  it("writes MCP configuration and base instruction links into --path", async () => {
+    const fixture = await makeFixture();
+    const target = join(fixture.root, "project");
+    const instruction = join(fixture.root, "CLAUDE.template.md");
+    await mkdir(target);
+    await writeFile(instruction, "# base\n");
+    await writeFile(
+      fixture.configPath,
+      JSON.stringify({
+        modes: {
+          dev: {
+            skills: [fixture.source],
+            mcpServers: {
+              context7: { type: "remote", url: "https://mcp.context7.com/mcp" },
+            },
+            baseInstruction: { claude: { PATH: instruction, NAME: "CLAUDE.md" } },
+          },
+        },
+      }),
+    );
+
+    const exitCode = await run(
+      ["link", "dev", "--platform", "claude", "--path", target, "--config", fixture.configPath],
+      fixture.cwd,
+      new CaptureStream(),
+      new CaptureStream(),
+    );
+
+    assert.equal(exitCode, 0);
+    assert.ok((await readFile(join(target, ".mcp.json"), "utf8")).includes("context7"));
+    assert.equal(
+      await realpath(join(target, ".claude", "CLAUDE.md")),
+      await realpath(instruction),
+    );
+    await assert.rejects(lstat(join(fixture.cwd, ".mcp.json")), { code: "ENOENT" });
+    await assert.rejects(lstat(join(fixture.cwd, ".claude")), { code: "ENOENT" });
+  });
+
+  it("fails without writing when --path does not exist", async () => {
+    const fixture = await makeFixture();
+    const stderr = new CaptureStream();
+
+    const exitCode = await run(
+      ["link", "dev", "--path", join(fixture.root, "missing"), "--config", fixture.configPath],
+      fixture.cwd,
+      new CaptureStream(),
+      stderr,
+    );
+
+    assert.equal(exitCode, 1);
+    assert.match(stderr.text(), /--path does not exist/);
+    await assert.rejects(lstat(join(fixture.cwd, ".codex")), { code: "ENOENT" });
+    await assert.rejects(lstat(join(fixture.root, "missing")), { code: "ENOENT" });
+  });
+
+  it("fails when --path is not a directory", async () => {
+    const fixture = await makeFixture();
+    const stderr = new CaptureStream();
+
+    const exitCode = await run(
+      ["link", "dev", "--path", fixture.configPath, "--config", fixture.configPath],
+      fixture.cwd,
+      new CaptureStream(),
+      stderr,
+    );
+
+    assert.equal(exitCode, 1);
+    assert.match(stderr.text(), /--path is not a directory/);
+  });
+
+  it("rejects --path for list", async () => {
+    const fixture = await makeFixture();
+    const stderr = new CaptureStream();
+
+    const exitCode = await run(
+      ["list", "--path", fixture.cwd, "--config", fixture.configPath],
+      fixture.cwd,
+      new CaptureStream(),
+      stderr,
+    );
+
+    assert.equal(exitCode, 1);
+    assert.match(stderr.text(), /list does not accept --path/);
+  });
+});
