@@ -121,5 +121,6 @@ if (!apiKey) throw new Error("缺少 ARK_API_KEY，请写入 ~/.yonge/.yonge-ski
 
 - [ ] `bun scripts/lib/skill-config.ts --skill <技能名>` 能读取到用户的真实配置
 - [ ] 删除（或改名）EXTEND.md 后，技能会进入首次设置，而不是静默使用默认值
-- [ ] 写一个未知字段、一个数组、一个 `api_key: x`，分别得到警告、报错、报错
+- [ ] 写一个未知字段、一个 flow 映射 `{a: 1}`、一个 `api_key: x`，分别得到警告、报错、报错
+- [ ] 写一个逐行列表与一个行内数组 `[a, b]`，都能正确解析成数组
 - [ ] 技能原有的测试全部通过
